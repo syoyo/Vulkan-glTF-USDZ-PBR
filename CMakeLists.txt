@@ -1,10 +1,14 @@
-cmake_minimum_required(VERSION 2.8 FATAL_ERROR)
-cmake_policy(VERSION 2.8)
+cmake_minimum_required(VERSION 3.12 FATAL_ERROR)
+cmake_policy(VERSION 3.12)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/cmake")
 
-set(NAME Vulkan-glTF-PBR)
+set(NAME Vulkan-USDZ-PBR)
 
-project(${NAME})
+project(${NAME} CXX)
+
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 include_directories(external)
 include_directories(external/glm)
@@ -12,6 +16,7 @@ include_directories(external/gli)
 include_directories(external/imgui)
 include_directories(external/tinygltf)
 include_directories(base)
+
 
 OPTION(USE_D2D_WSI "Build the project using Direct to Display swapchain" OFF)
 OPTION(USE_WAYLAND_WSI "Build the project using Wayland swapchain" OFF)
@@ -31,6 +36,9 @@ IF(EXISTS ${CMAKE_SOURCE_DIR}/external/draco/draco_features.h)
     message(FATAL_ERROR "Draco decoder library not found!")
   ENDIF()
 ENDIF()
+
+add_subdirectory(${CMAKE_SOURCE_DIR}/external/tinyusdz tinyusdz_build EXCLUDE_FROM_ALL)
+set(TINYUSDZ_LIBRARY tinyusdz_static)
 
 # Use FindVulkan module added with CMAKE 3.7
 if (NOT CMAKE_VERSION VERSION_LESS 3.7.0)
@@ -95,8 +103,9 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-switch-enum")
 endif()
 
+
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)
-add_definitions(-std=c++11)
+#add_definitions(-std=c++11)
 
 file(GLOB SOURCE *.cpp )
 
