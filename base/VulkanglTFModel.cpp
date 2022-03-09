@@ -6,8 +6,6 @@
  * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
  */
 
-#pragma once
-
 #define TINYGLTF_IMPLEMENTATION
 #define TINYGLTF_NO_STB_IMAGE_WRITE
 #define STB_IMAGE_IMPLEMENTATION
@@ -706,6 +704,9 @@ namespace vkglTF
 		case 33648:
 			return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
 		}
+
+    // TODO(syoyo): Return invalid value or raise an exception?
+    return VK_SAMPLER_ADDRESS_MODE_REPEAT;
 	}
 
 	VkFilter Model::getVkFilterMode(int32_t filterMode)
@@ -724,6 +725,9 @@ namespace vkglTF
 		case 9987:
 			return VK_FILTER_LINEAR;
 		}
+
+    // TODO(syoyo): Return invalid value or raise an exception?
+    return VK_FILTER_LINEAR;
 	}
 
 	void Model::loadTextureSamplers(tinygltf::Model &gltfModel)
