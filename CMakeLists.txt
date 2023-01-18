@@ -18,6 +18,8 @@ OPTION(USE_WAYLAND_WSI "Build the project using Wayland swapchain" OFF)
 
 set(RESOURCE_INSTALL_DIR "" CACHE PATH "Path to install resources to (leave empty for running uninstalled)")
 
+find_package(Sanitizers) # Address sanitizer (-DSANITIZE_ADDRESS=ON)
+
 # Enable Draco mesh compression if source and library are present
 IF(EXISTS ${CMAKE_SOURCE_DIR}/external/draco/draco_features.h)
   message(STATUS "Draco source and library found at " ${CMAKE_SOURCE_DIR}/external/draco)
