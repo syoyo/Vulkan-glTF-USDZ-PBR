@@ -6,7 +6,8 @@ set(NAME Vulkan-USDZ-PBR)
 
 project(${NAME} CXX)
 
-set(CMAKE_CXX_STANDARD 11)
+# Need C++-14 to compile TinyUSDZ
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -15,6 +16,7 @@ include_directories(external/glm)
 include_directories(external/gli)
 include_directories(external/imgui)
 include_directories(external/tinygltf)
+include_directories(external/tinyusdz/src)
 include_directories(base)
 
 
