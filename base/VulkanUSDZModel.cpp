@@ -696,21 +696,26 @@ namespace vkUSDZ
 			textures.push_back(texture);
 		}
 	}
+#endif
 
-	VkSamplerAddressMode Model::getVkWrapMode(int32_t wrapMode)
+	VkSamplerAddressMode Model::getVkWrapMode(tinyusdz::tydra::UVTexture::WrapMode wrapMode)
 	{
 		switch (wrapMode) {
-		case 10497:
+		case tinyusdz::tydra::UVTexture::WrapMode::REPEAT:
 			return VK_SAMPLER_ADDRESS_MODE_REPEAT;
-		case 33071:
+		case tinyusdz::tydra::UVTexture::WrapMode::CLAMP_TO_EDGE:
 			return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-		case 33648:
+		case tinyusdz::tydra::UVTexture::WrapMode::MIRROR:
 			return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+		case tinyusdz::tydra::UVTexture::WrapMode::CLAMP_TO_BORDER:
+			// TODO(syoyo): set border color
+			return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
 		}
 
     // TODO(syoyo): Return invalid value or raise an exception?
     return VK_SAMPLER_ADDRESS_MODE_REPEAT;
 	}
+#if 0
 
 	VkFilter Model::getVkFilterMode(int32_t filterMode)
 	{

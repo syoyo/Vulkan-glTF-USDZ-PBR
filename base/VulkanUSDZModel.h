@@ -7,7 +7,7 @@
  */
 
 /*
- * USDZ loader by Syoyo Fujita
+ * USDZ loader modification by Syoyo Fujita
  */
 
 #pragma once
@@ -35,8 +35,8 @@
 #pragma message ("ERROR constant already defined, undefining")
 #endif
 
-//#include "tiny_gltf.h"
 
+// TinyUSDZ headers
 #include "tinyusdz.hh"
 #include "tydra/render-data.hh"
 
@@ -81,7 +81,7 @@ namespace vkUSDZ
 		VkSampler sampler;
 		void updateDescriptor();
 		void destroy();
-		// Load a texture from a USDZ image (stored as vector of chars loaded via stb_image) and generate a full mip chaing for it
+		// Load a texture from a USDZ image (Texture info + texel data stored as vector of chars) and generate a full mip chaing for it
 		void fromUSDZImage(tinyusdz::tydra::TextureImage& usdzimage, const std::vector<uint8_t> &texturedata, TextureSampler textureSampler, vks::VulkanDevice* device, VkQueue copyQueue);
 	};
 
@@ -247,12 +247,13 @@ namespace vkUSDZ
 		void loadNode(vkUSDZ::Node* parent, const tinygltf::Node& node, uint32_t nodeIndex, const tinygltf::Model& model, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer, float globalscale);
 		void loadSkins(tinygltf::Model& gltfModel);
 		void loadTextures(tinygltf::Model& gltfModel, vks::VulkanDevice* device, VkQueue transferQueue);
-		VkSamplerAddressMode getVkWrapMode(int32_t wrapMode);
-		VkFilter getVkFilterMode(int32_t filterMode);
 		void loadTextureSamplers(tinygltf::Model& gltfModel);
 		void loadMaterials(tinygltf::Model& gltfModel);
 		void loadAnimations(tinygltf::Model& gltfModel);
 #endif
+		VkSamplerAddressMode getVkWrapMode(tinyusdz::tydra::UVTexture::WrapMode mode);
+    // No texture filtering in UsdUVTexture for now
+		//VkFilter getVkFilterMode(itinnt32_t filterMode);
 		void loadFromFile(std::string filename, vks::VulkanDevice* device, VkQueue transferQueue, float scale = 1.0f);
 		void drawNode(Node* node, VkCommandBuffer commandBuffer);
 		void draw(VkCommandBuffer commandBuffer);
