@@ -235,7 +235,7 @@ namespace vkUSDZ
 		std::vector<TextureSampler> textureSamplers;
 		std::vector<Material> materials;
 		std::vector<Animation> animations;
-		std::vector<std::string> extensions;
+		//std::vector<std::string> extensions;
 
 		struct Dimensions {
 			glm::vec3 min = glm::vec3(FLT_MAX);
@@ -243,8 +243,8 @@ namespace vkUSDZ
 		} dimensions;
 
 		void destroy(VkDevice device);
+		void loadNode(vkUSDZ::Node* parent, const tinyusdz::tydra::Node& node, uint32_t nodeIndex, const tinyusdz::tydra::RenderScene& scene, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer, float globalscale);
 #if 0
-		void loadNode(vkUSDZ::Node* parent, const tinygltf::Node& node, uint32_t nodeIndex, const tinygltf::Model& model, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer, float globalscale);
 		void loadSkins(tinygltf::Model& gltfModel);
 		void loadTextures(tinygltf::Model& gltfModel, vks::VulkanDevice* device, VkQueue transferQueue);
 		void loadTextureSamplers(tinygltf::Model& gltfModel);

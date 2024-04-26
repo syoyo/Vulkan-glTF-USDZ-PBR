@@ -420,7 +420,7 @@ namespace vkUSDZ
 		animations.resize(0);
 		nodes.resize(0);
 		linearNodes.resize(0);
-		extensions.resize(0);
+		//extensions.resize(0);
 		for (auto skin : skins) {
 			delete skin;
 		}
@@ -950,28 +950,39 @@ namespace vkUSDZ
 			animations.push_back(animation);
 		}
 	}
+#endif
 
 	void Model::loadFromFile(std::string filename, vks::VulkanDevice *device, VkQueue transferQueue, float scale)
 	{
-		tinygltf::Model gltfModel;
-		tinygltf::TinyGLTF gltfContext;
+		tinyusdz::Stage stage;
 		std::string error;
 		std::string warning;
 
 		this->device = device;
 
-		bool binary = false;
-		size_t extpos = filename.rfind('.', filename.length());
-		if (extpos != std::string::npos) {
-			binary = (filename.substr(extpos + 1, filename.length() - extpos) == "glb");
-		}  
+		bool fileLoaded = tinyusdz::LoadUSDFromFile(filename, &stage, &warning, &error);
 
-		bool fileLoaded = binary ? gltfContext.LoadBinaryFromFile(&gltfModel, &error, &warning, filename.c_str()) : gltfContext.LoadASCIIFromFile(&gltfModel, &error, &warning, filename.c_str());
+		if (warning.size()) {
+			std::cerr << "WARN: " << warning << std::endl;
+		}
 
 		std::vector<uint32_t> indexBuffer;
 		std::vector<Vertex> vertexBuffer;
 
 		if (fileLoaded) {
+			bool is_usdz = tinyusdz::IsUSDZ(filename);
+
+			// Convert USD Scene(Stage) to Vulkan-friendly scene data using TinyUSDZ Tydra
+			tinyusdz::tydra::RenderScene render_scene;
+			tinyusdz::tydra::RenderSceneConverter converter;
+			tinyusdz::tydra::RenderSceneConverterEnv env(stage);
+
+			// In default, RenderSceneConverter triangulate meshes and build single vertex index.
+			//env.mesh_config.triangulate = true;
+			//env.mesh_config.build_vertex_indices = true;
+
+			
+#if 0
 			loadTextureSamplers(gltfModel);
 			loadTextures(gltfModel, device, transferQueue);
 			loadMaterials(gltfModel);
@@ -996,6 +1007,7 @@ namespace vkUSDZ
 					node->update();
 				}
 			}
+#endif
 		}
 		else {
 			// TODO: throw
@@ -1003,7 +1015,7 @@ namespace vkUSDZ
 			return;
 		}
 
-		extensions = gltfModel.extensionsUsed;
+		//extensions = gltfModel.extensionsUsed;
 
 		size_t vertexBufferSize = vertexBuffer.size() * sizeof(Vertex);
 		size_t indexBufferSize = indexBuffer.size() * sizeof(uint32_t);
@@ -1078,7 +1090,6 @@ namespace vkUSDZ
 
 		getSceneDimensions();
 	}
-#endif
 
 	void Model::drawNode(Node *node, VkCommandBuffer commandBuffer)
 	{
