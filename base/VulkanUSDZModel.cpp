@@ -747,15 +747,58 @@ namespace vkUSDZ
 			textureSamplers.push_back(sampler);
 		}
 	}
+#endif
 
-	void Model::loadMaterials(tinygltf::Model &gltfModel)
+	void Model::loadMaterials(tinyusdz::tydra::RenderScene &scene)
 	{
-		for (tinygltf::Material &mat : gltfModel.materials) {
+		for (tinyusdz::tydra::RenderMaterial &rmat : scene.materials) {
 			vkUSDZ::Material material{};
-			if (mat.values.find("baseColorTexture") != mat.values.end()) {
-				material.baseColorTexture = &textures[mat.values["baseColorTexture"].TextureIndex()];
-				material.texCoordSets.baseColor = mat.values["baseColorTexture"].TextureTexCoord();
+			// TODO: Support multi-texcoord
+			if (rmat.surfaceShader.diffuseColor.is_texture()) {
+				material.baseColorTexture = &textures[size_t(rmat.surfaceShader.diffuseColor.texture_id)];
+				material.texCoordSets.baseColor = 0;
+				
+			} else {
+				material.baseColorFactor.r = rmat.surfaceShader.diffuseColor.value[0];
+				material.baseColorFactor.g = rmat.surfaceShader.diffuseColor.value[1];
+				material.baseColorFactor.b = rmat.surfaceShader.diffuseColor.value[2];
 			}
+
+			if (rmat.surfaceShader.emissiveColor.is_texture()) {
+				material.emissiveTexture = &textures[size_t(rmat.surfaceShader.emissiveColor.texture_id)];
+				material.texCoordSets.emissive = 0;
+				
+			} else {
+				material.emissiveFactor.r = rmat.surfaceShader.emissiveColor.value[0];
+				material.emissiveFactor.g = rmat.surfaceShader.emissiveColor.value[1];
+				material.emissiveFactor.b = rmat.surfaceShader.emissiveColor.value[2];
+			}
+
+			if (rmat.surfaceShader.normal.is_texture()) {
+				material.normalTexture = &textures[size_t(rmat.surfaceShader.normal.texture_id)];
+				material.texCoordSets.normal = 0;
+			}
+
+			if (rmat.surfaceShader.occlusion.is_texture()) {
+				material.occlusionTexture = &textures[size_t(rmat.surfaceShader.occlusion.texture_id)];
+				material.texCoordSets.occlusion = 0;
+			}
+
+			if (rmat.surfaceShader.opacity.is_texture()) {
+				// TODO
+			} else {
+				// Treat as blend
+				material.alphaMode = Material::ALPHAMODE_BLEND;
+			}
+
+			if (rmat.surfaceShader.opacityThreshold.is_texture()) {
+				// TODO
+			} else {
+				material.alphaCutoff = static_cast<float>(rmat.surfaceShader.opacityThreshold.value);
+			}
+
+
+#if 0 // TODO
 			if (mat.values.find("metallicRoughnessTexture") != mat.values.end()) {
 				material.metallicRoughnessTexture = &textures[mat.values["metallicRoughnessTexture"].TextureIndex()];
 				material.texCoordSets.metallicRoughness = mat.values["metallicRoughnessTexture"].TextureTexCoord();
@@ -765,38 +808,6 @@ namespace vkUSDZ
 			}
 			if (mat.values.find("metallicFactor") != mat.values.end()) {
 				material.metallicFactor = static_cast<float>(mat.values["metallicFactor"].Factor());
-			}
-			if (mat.values.find("baseColorFactor") != mat.values.end()) {
-				material.baseColorFactor = glm::make_vec4(mat.values["baseColorFactor"].ColorFactor().data());
-			}
-			if (mat.additionalValues.find("normalTexture") != mat.additionalValues.end()) {
-				material.normalTexture = &textures[mat.additionalValues["normalTexture"].TextureIndex()];
-				material.texCoordSets.normal = mat.additionalValues["normalTexture"].TextureTexCoord();
-			}
-			if (mat.additionalValues.find("emissiveTexture") != mat.additionalValues.end()) {
-				material.emissiveTexture = &textures[mat.additionalValues["emissiveTexture"].TextureIndex()];
-				material.texCoordSets.emissive = mat.additionalValues["emissiveTexture"].TextureTexCoord();
-			}
-			if (mat.additionalValues.find("occlusionTexture") != mat.additionalValues.end()) {
-				material.occlusionTexture = &textures[mat.additionalValues["occlusionTexture"].TextureIndex()];
-				material.texCoordSets.occlusion = mat.additionalValues["occlusionTexture"].TextureTexCoord();
-			}
-			if (mat.additionalValues.find("alphaMode") != mat.additionalValues.end()) {
-				tinygltf::Parameter param = mat.additionalValues["alphaMode"];
-				if (param.string_value == "BLEND") {
-					material.alphaMode = Material::ALPHAMODE_BLEND;
-				}
-				if (param.string_value == "MASK") {
-					material.alphaCutoff = 0.5f;
-					material.alphaMode = Material::ALPHAMODE_MASK;
-				}
-			}
-			if (mat.additionalValues.find("alphaCutoff") != mat.additionalValues.end()) {
-				material.alphaCutoff = static_cast<float>(mat.additionalValues["alphaCutoff"].Factor());
-			}
-			if (mat.additionalValues.find("emissiveFactor") != mat.additionalValues.end()) {
-				material.emissiveFactor = glm::vec4(glm::make_vec3(mat.additionalValues["emissiveFactor"].ColorFactor().data()), 1.0);
-				material.emissiveFactor = glm::vec4(0.0f);
 			}
 
 			// Extensions
@@ -829,6 +840,7 @@ namespace vkUSDZ
 					}
 				}
 			}
+#endif
 
 			materials.push_back(material);
 		}
@@ -836,6 +848,7 @@ namespace vkUSDZ
 		materials.push_back(Material());
 	}
 
+#if 0
 	void Model::loadAnimations(tinygltf::Model &gltfModel)
 	{
 		for (tinygltf::Animation &anim : gltfModel.animations) {
@@ -1020,8 +1033,8 @@ namespace vkUSDZ
 #if 0
 			loadTextureSamplers(gltfModel);
 			loadTextures(gltfModel, device, transferQueue);
-			loadMaterials(gltfModel);
 #endif
+			loadMaterials(render_scene);
 			// TODO: scene handling with no default scene
 			const tinyusdz::tydra::Node &root = render_scene.nodes[render_scene.default_root_node];
 			uint32_t nodeIdx = 0;
