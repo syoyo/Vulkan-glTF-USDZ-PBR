@@ -1,6 +1,7 @@
 apply plugin: 'com.android.application'
 
 android {
+    namespace "de.saschawillems.vulkanglTFPBR"
     compileSdkVersion 26
     defaultConfig {
         applicationId "de.saschawillems.vulkanglTFPBR"
@@ -10,11 +11,11 @@ android {
         versionName "1.0"
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
         ndk {
-            abiFilters "armeabi-v7a"
+            abiFilters "arm64-v8a"
         }
         externalNativeBuild {
             cmake {
-                cppFlags "-std=c++11"
+                cppFlags "-std=c++14"
                 arguments "-DANDROID_STL=c++_shared"
             }
         }
