@@ -31,7 +31,7 @@ namespace vkUSDZ
 		glm::vec3 min = glm::vec3(m[3]);
 		glm::vec3 max = min;
 		glm::vec3 v0, v1;
-			
+
 		glm::vec3 right = glm::vec3(m[0]);
 		v0 = right * this->min.x;
 		v1 = right * this->max.x;
@@ -471,165 +471,152 @@ namespace vkUSDZ
 		// Node contains mesh data
 		if ((node.nodeType == tinyusdz::tydra::NodeType::Mesh) && (node.id > -1)) {
 			const tinyusdz::tydra::RenderMesh &rmesh = scene.meshes[size_t(node.id)];
+
 			// Assume meshes are triangulated and have indices.
-			assert((rmesh.faceVertexIndices().size() % 3 == 0);
-			Mesh *newMesh = new Mesh(device, newNode->matrix);
-			for (size_t j = 0; j < mesh.primitives.size(); j++) {
-				const tinygltf::Primitive &primitive = mesh.primitives[j];
-				uint32_t indexStart = static_cast<uint32_t>(indexBuffer.size());
-				uint32_t vertexStart = static_cast<uint32_t>(vertexBuffer.size());
-				uint32_t indexCount = 0;
-				uint32_t vertexCount = 0;
-				glm::vec3 posMin{};
-				glm::vec3 posMax{};
-				bool hasSkin = false;
-				bool hasIndices = primitive.indices > -1;
-				// Vertices
-				{
-					const float *bufferPos = nullptr;
-					const float *bufferNormals = nullptr;
-					const float *bufferTexCoordSet0 = nullptr;
-					const float *bufferTexCoordSet1 = nullptr;
-					const void *bufferJoints = nullptr;
-					const float *bufferWeights = nullptr;
+			assert((rmesh.faceVertexIndices().size() % 3) == 0);
 
-					int posByteStride;
-					int normByteStride;
-					int uv0ByteStride;
-					int uv1ByteStride;
-					int jointByteStride;
-					int weightByteStride;
-
-					int jointComponentType;
-
-					// Position attribute is required
-					assert(primitive.attributes.find("POSITION") != primitive.attributes.end());
-
-					const tinygltf::Accessor &posAccessor = model.accessors[primitive.attributes.find("POSITION")->second];
-					const tinygltf::BufferView &posView = model.bufferViews[posAccessor.bufferView];
-					bufferPos = reinterpret_cast<const float *>(&(model.buffers[posView.buffer].data[posAccessor.byteOffset + posView.byteOffset]));
-					posMin = glm::vec3(posAccessor.minValues[0], posAccessor.minValues[1], posAccessor.minValues[2]);
-					posMax = glm::vec3(posAccessor.maxValues[0], posAccessor.maxValues[1], posAccessor.maxValues[2]);
-					vertexCount = static_cast<uint32_t>(posAccessor.count);
-					posByteStride = posAccessor.ByteStride(posView) ? (posAccessor.ByteStride(posView) / sizeof(float)) : tinygltf::GetTypeSizeInBytes(TINYGLTF_TYPE_VEC3);
-
-					if (primitive.attributes.find("NORMAL") != primitive.attributes.end()) {
-						const tinygltf::Accessor &normAccessor = model.accessors[primitive.attributes.find("NORMAL")->second];
-						const tinygltf::BufferView &normView = model.bufferViews[normAccessor.bufferView];
-						bufferNormals = reinterpret_cast<const float *>(&(model.buffers[normView.buffer].data[normAccessor.byteOffset + normView.byteOffset]));
-						normByteStride = normAccessor.ByteStride(normView) ? (normAccessor.ByteStride(normView) / sizeof(float)) : tinygltf::GetTypeSizeInBytes(TINYGLTF_TYPE_VEC3);
-					}
-
-					if (primitive.attributes.find("TEXCOORD_0") != primitive.attributes.end()) {
-						const tinygltf::Accessor &uvAccessor = model.accessors[primitive.attributes.find("TEXCOORD_0")->second];
-						const tinygltf::BufferView &uvView = model.bufferViews[uvAccessor.bufferView];
-						bufferTexCoordSet0 = reinterpret_cast<const float *>(&(model.buffers[uvView.buffer].data[uvAccessor.byteOffset + uvView.byteOffset]));
-						uv0ByteStride = uvAccessor.ByteStride(uvView) ? (uvAccessor.ByteStride(uvView) / sizeof(float)) : tinygltf::GetTypeSizeInBytes(TINYGLTF_TYPE_VEC2);
-					}
-					if (primitive.attributes.find("TEXCOORD_1") != primitive.attributes.end()) {
-						const tinygltf::Accessor &uvAccessor = model.accessors[primitive.attributes.find("TEXCOORD_1")->second];
-						const tinygltf::BufferView &uvView = model.bufferViews[uvAccessor.bufferView];
-						bufferTexCoordSet1 = reinterpret_cast<const float *>(&(model.buffers[uvView.buffer].data[uvAccessor.byteOffset + uvView.byteOffset]));
-						uv1ByteStride = uvAccessor.ByteStride(uvView) ? (uvAccessor.ByteStride(uvView) / sizeof(float)) : tinygltf::GetTypeSizeInBytes(TINYGLTF_TYPE_VEC2);
-					}
-
-					// Skinning
-					// Joints
-					if (primitive.attributes.find("JOINTS_0") != primitive.attributes.end()) {
-						const tinygltf::Accessor &jointAccessor = model.accessors[primitive.attributes.find("JOINTS_0")->second];
-						const tinygltf::BufferView &jointView = model.bufferViews[jointAccessor.bufferView];
-						bufferJoints = &(model.buffers[jointView.buffer].data[jointAccessor.byteOffset + jointView.byteOffset]);
-						jointComponentType = jointAccessor.componentType;
-						jointByteStride = jointAccessor.ByteStride(jointView) ? (jointAccessor.ByteStride(jointView) / tinygltf::GetComponentSizeInBytes(jointComponentType)) : tinygltf::GetTypeSizeInBytes(TINYGLTF_TYPE_VEC4);
-					}
-
-					if (primitive.attributes.find("WEIGHTS_0") != primitive.attributes.end()) {
-						const tinygltf::Accessor &weightAccessor = model.accessors[primitive.attributes.find("WEIGHTS_0")->second];
-						const tinygltf::BufferView &weightView = model.bufferViews[weightAccessor.bufferView];
-						bufferWeights = reinterpret_cast<const float *>(&(model.buffers[weightView.buffer].data[weightAccessor.byteOffset + weightView.byteOffset]));
-						weightByteStride = weightAccessor.ByteStride(weightView) ? (weightAccessor.ByteStride(weightView) / sizeof(float)) : tinygltf::GetTypeSizeInBytes(TINYGLTF_TYPE_VEC4);
-					}
-
-					hasSkin = (bufferJoints && bufferWeights);
-
-					for (size_t v = 0; v < posAccessor.count; v++) {
-						Vertex vert{};
-						vert.pos = glm::vec4(glm::make_vec3(&bufferPos[v * posByteStride]), 1.0f);
-						vert.normal = glm::normalize(glm::vec3(bufferNormals ? glm::make_vec3(&bufferNormals[v * normByteStride]) : glm::vec3(0.0f)));
-						vert.uv0 = bufferTexCoordSet0 ? glm::make_vec2(&bufferTexCoordSet0[v * uv0ByteStride]) : glm::vec3(0.0f);
-						vert.uv1 = bufferTexCoordSet1 ? glm::make_vec2(&bufferTexCoordSet1[v * uv1ByteStride]) : glm::vec3(0.0f);
-
-						if (hasSkin)
-						{
-							switch (jointComponentType) {
-							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
-								const uint16_t *buf = static_cast<const uint16_t*>(bufferJoints);
-								vert.joint0 = glm::vec4(glm::make_vec4(&buf[v * jointByteStride]));
-								break;
-							}
-							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
-								const uint8_t *buf = static_cast<const uint8_t*>(bufferJoints);
-								vert.joint0 = glm::vec4(glm::make_vec4(&buf[v * jointByteStride]));
-								break;
-							}
-							default:
-								// Not supported by spec
-								std::cerr << "Joint component type " << jointComponentType << " not supported!" << std::endl;
-								break;
-							}
-						}
-						else {
-							vert.joint0 = glm::vec4(0.0f);
-						}
-						vert.weight0 = hasSkin ? glm::make_vec4(&bufferWeights[v * weightByteStride]) : glm::vec4(0.0f);
-						// Fix for all zero weights
-						if (glm::length(vert.weight0) == 0.0f) {
-							vert.weight0 = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
-						}
-						vertexBuffer.push_back(vert);
-					}
-				}
-				// Indices
-				if (hasIndices)
-				{
-					const tinygltf::Accessor &accessor = model.accessors[primitive.indices > -1 ? primitive.indices : 0];
-					const tinygltf::BufferView &bufferView = model.bufferViews[accessor.bufferView];
-					const tinygltf::Buffer &buffer = model.buffers[bufferView.buffer];
-
-					indexCount = static_cast<uint32_t>(accessor.count);
-					const void *dataPtr = &(buffer.data[accessor.byteOffset + bufferView.byteOffset]);
-
-					switch (accessor.componentType) {
-					case TINYGLTF_PARAMETER_TYPE_UNSIGNED_INT: {
-						const uint32_t *buf = static_cast<const uint32_t*>(dataPtr);
-						for (size_t index = 0; index < accessor.count; index++) {
-							indexBuffer.push_back(buf[index] + vertexStart);
-						}
-						break;
-					}
-					case TINYGLTF_PARAMETER_TYPE_UNSIGNED_SHORT: {
-						const uint16_t *buf = static_cast<const uint16_t*>(dataPtr);
-						for (size_t index = 0; index < accessor.count; index++) {
-							indexBuffer.push_back(buf[index] + vertexStart);
-						}
-						break;
-					}
-					case TINYGLTF_PARAMETER_TYPE_UNSIGNED_BYTE: {
-						const uint8_t *buf = static_cast<const uint8_t*>(dataPtr);
-						for (size_t index = 0; index < accessor.count; index++) {
-							indexBuffer.push_back(buf[index] + vertexStart);
-						}
-						break;
-					}
-					default:
-						std::cerr << "Index component type " << accessor.componentType << " not supported!" << std::endl;
-						return;
-					}
-				}					
-				Primitive *newPrimitive = new Primitive(indexStart, indexCount, vertexCount, primitive.material > -1 ? materials[primitive.material] : materials.back());
-				newPrimitive->setBoundingBox(posMin, posMax);
-				newMesh->primitives.push_back(newPrimitive);
+			for (size_t fc = 0; fc < rmesh.faceVertexCounts().size(); fc++) {
+				assert(rmesh.faceVertexCounts()[fc] == 3);
 			}
+
+			Mesh *newMesh = new Mesh(device, newNode->matrix);
+
+			// Vertices
+			uint32_t indexStart = static_cast<uint32_t>(indexBuffer.size());
+			uint32_t vertexStart = static_cast<uint32_t>(vertexBuffer.size());
+			uint32_t indexCount = 0;
+			uint32_t vertexCount = 0;
+			glm::vec3 posMin{(std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)(), (std::numeric_limits<float>::max)()};
+			glm::vec3 posMax{(std::numeric_limits<float>::min)(), (std::numeric_limits<float>::min)(), (std::numeric_limits<float>::min)()};
+			bool hasSkin = false;
+			bool hasIndices = rmesh.faceVertexIndices().size();
+
+			const float *bufferPos = nullptr;
+			const float *bufferNormals = nullptr;
+			const float *bufferTexCoordSet0 = nullptr;
+			const float *bufferTexCoordSet1 = nullptr;
+			const void *bufferJoints = nullptr;
+			const float *bufferWeights = nullptr;
+
+			int posByteStride;
+			int normByteStride;
+			int uv0ByteStride;
+			int uv1ByteStride;
+			int jointByteStride;
+			int weightByteStride;
+			int jointComponentType;
+
+			for (size_t i = 0; i < rmesh.points.size(); i++) {
+				posMin[0] = (std::min)(posMin[0], rmesh.points[i][0]);
+				posMin[1] = (std::min)(posMin[1], rmesh.points[i][2]);
+				posMin[2] = (std::min)(posMin[2], rmesh.points[i][2]);
+
+				posMax[0] = (std::max)(posMin[0], rmesh.points[i][0]);
+				posMax[1] = (std::max)(posMin[1], rmesh.points[i][2]);
+				posMax[2] = (std::max)(posMin[2], rmesh.points[i][2]);
+			}
+
+			// TODO: Support GeomSubset materialBind(per-face material)
+
+			// Position attribute is required
+			assert(rmesh.points.size());
+			posByteStride = sizeof(float) * 3;
+
+			bufferPos = reinterpret_cast<const float *>(rmesh.points.data());
+
+			if (!rmesh.normals.empty() && rmesh.normals.is_vertex() && (rmesh.normals.vertex_count() == rmesh.points.size())) {
+				bufferNormals = reinterpret_cast<const float *>(rmesh.normals.buffer());
+				normByteStride = rmesh.normals.stride_bytes();
+
+			}
+
+			if (rmesh.texcoords.count(0) && !rmesh.texcoords.at(0).empty() && rmesh.texcoords.at(0).is_vertex() && (rmesh.texcoords.at(0).vertex_count() == rmesh.points.size())) {
+				bufferTexCoordSet0 = reinterpret_cast<const float *>(rmesh.texcoords.at(0).buffer());
+				uv0ByteStride = rmesh.texcoords.at(0).stride_bytes();
+			}
+
+			if (rmesh.texcoords.count(1) && !rmesh.texcoords.at(1).empty() && rmesh.texcoords.at(1).is_vertex() && (rmesh.texcoords.at(1).vertex_count() == rmesh.points.size())) {
+				bufferTexCoordSet1 = reinterpret_cast<const float *>(rmesh.texcoords.at(1).buffer());
+				uv1ByteStride = rmesh.texcoords.at(1).stride_bytes();
+			}
+
+
+#if 0 // TODO
+						// Skinning
+						// Joints
+						if (primitive.attributes.find("JOINTS_0") != primitive.attributes.end()) {
+							const tinygltf::Accessor &jointAccessor = model.accessors[primitive.attributes.find("JOINTS_0")->second];
+							const tinygltf::BufferView &jointView = model.bufferViews[jointAccessor.bufferView];
+							bufferJoints = &(model.buffers[jointView.buffer].data[jointAccessor.byteOffset + jointView.byteOffset]);
+							jointComponentType = jointAccessor.componentType;
+							jointByteStride = jointAccessor.ByteStride(jointView) ? (jointAccessor.ByteStride(jointView) / tinygltf::GetComponentSizeInBytes(jointComponentType)) : tinygltf::GetTypeSizeInBytes(TINYGLTF_TYPE_VEC4);
+						}
+
+						if (primitive.attributes.find("WEIGHTS_0") != primitive.attributes.end()) {
+							const tinygltf::Accessor &weightAccessor = model.accessors[primitive.attributes.find("WEIGHTS_0")->second];
+							const tinygltf::BufferView &weightView = model.bufferViews[weightAccessor.bufferView];
+							bufferWeights = reinterpret_cast<const float *>(&(model.buffers[weightView.buffer].data[weightAccessor.byteOffset + weightView.byteOffset]));
+							weightByteStride = weightAccessor.ByteStride(weightView) ? (weightAccessor.ByteStride(weightView) / sizeof(float)) : tinygltf::GetTypeSizeInBytes(TINYGLTF_TYPE_VEC4);
+						}
+
+						hasSkin = (bufferJoints && bufferWeights);
+#endif
+
+			for (size_t v = 0; v < rmesh.points.size(); v++) {
+				Vertex vert{};
+				vert.pos = glm::vec4(glm::make_vec3(&bufferPos[v * posByteStride]), 1.0f);
+				vert.normal = glm::normalize(glm::vec3(bufferNormals ? glm::make_vec3(&bufferNormals[v * normByteStride]) : glm::vec3(0.0f)));
+				vert.uv0 = bufferTexCoordSet0 ? glm::make_vec2(&bufferTexCoordSet0[v * uv0ByteStride]) : glm::vec3(0.0f);
+				vert.uv1 = bufferTexCoordSet1 ? glm::make_vec2(&bufferTexCoordSet1[v * uv1ByteStride]) : glm::vec3(0.0f);
+
+#if 0
+				if (hasSkin)
+				{
+								switch (jointComponentType) {
+								case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
+									const uint16_t *buf = static_cast<const uint16_t*>(bufferJoints);
+									vert.joint0 = glm::vec4(glm::make_vec4(&buf[v * jointByteStride]));
+									break;
+								}
+								case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
+									const uint8_t *buf = static_cast<const uint8_t*>(bufferJoints);
+									vert.joint0 = glm::vec4(glm::make_vec4(&buf[v * jointByteStride]));
+									break;
+								}
+								default:
+									// Not supported by spec
+									std::cerr << "Joint component type " << jointComponentType << " not supported!" << std::endl;
+									break;
+								}
+							}
+							else {
+								vert.joint0 = glm::vec4(0.0f);
+							}
+							vert.weight0 = hasSkin ? glm::make_vec4(&bufferWeights[v * weightByteStride]) : glm::vec4(0.0f);
+#else
+							vert.joint0 = glm::vec4(0.0f);
+							vert.weight0 = glm::vec4(0.0f);
+#endif
+							// Fix for all zero weights
+							if (glm::length(vert.weight0) == 0.0f) {
+								vert.weight0 = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+							}
+							vertexBuffer.push_back(vert);
+			}
+
+			// Indices
+			if (hasIndices)
+			{
+				indexCount = rmesh.faceVertexIndices().size();
+				indexBuffer = rmesh.faceVertexIndices();
+
+			}
+
+
+			Primitive *newPrimitive = new Primitive(indexStart, indexCount, vertexCount, rmesh.material_id > -1 ? materials[size_t(rmesh.material_id)] : materials.back());
+			newPrimitive->setBoundingBox(posMin, posMax);
+			newMesh->primitives.push_back(newPrimitive);
+
 			// Mesh BB from BBs of primitives
 			for (auto p : newMesh->primitives) {
 				if (p->bb.valid && !newMesh->bb.valid) {
@@ -655,7 +642,7 @@ namespace vkUSDZ
 		for (tinygltf::Skin &source : gltfModel.skins) {
 			Skin *newSkin = new Skin{};
 			newSkin->name = source.name;
-				
+
 			// Find skeleton root node
 			if (source.skeleton > -1) {
 				newSkin->skeletonRoot = nodeFromIndex(source.skeleton);
@@ -781,7 +768,7 @@ namespace vkUSDZ
 			}
 			if (mat.values.find("baseColorFactor") != mat.values.end()) {
 				material.baseColorFactor = glm::make_vec4(mat.values["baseColorFactor"].ColorFactor().data());
-			}				
+			}
 			if (mat.additionalValues.find("normalTexture") != mat.additionalValues.end()) {
 				material.normalTexture = &textures[mat.additionalValues["normalTexture"].TextureIndex()];
 				material.texCoordSets.normal = mat.additionalValues["normalTexture"].TextureTexCoord();
@@ -896,7 +883,7 @@ namespace vkUSDZ
 					}
 				}
 
-				// Read sampler output T/R/S values 
+				// Read sampler output T/R/S values
 				{
 					const tinygltf::Accessor &accessor = gltfModel.accessors[samp.output];
 					const tinygltf::BufferView &bufferView = gltfModel.bufferViews[accessor.bufferView];
@@ -1030,18 +1017,19 @@ namespace vkUSDZ
 			  std::cout << "ConvertToRenderScene warn: " << converter.GetWarning() << "\n";
 			}
 
-			
 #if 0
 			loadTextureSamplers(gltfModel);
 			loadTextures(gltfModel, device, transferQueue);
 			loadMaterials(gltfModel);
 #endif
 			// TODO: scene handling with no default scene
-			const tinygltf::Scene &scene = gltfModel.scenes[gltfModel.defaultScene > -1 ? gltfModel.defaultScene : 0];
-			for (size_t i = 0; i < scene.nodes.size(); i++) {
-				const tinygltf::Node node = gltfModel.nodes[scene.nodes[i]];
-				loadNode(nullptr, node, scene.nodes[i], gltfModel, indexBuffer, vertexBuffer, scale);
-			}
+			const tinyusdz::tydra::Node &root = render_scene.nodes[render_scene.default_root_node];
+			uint32_t nodeIdx = 0;
+			loadNode(nullptr, root, /* inout */nodeIdx, render_scene, indexBuffer, vertexBuffer, scale);
+			//for (size_t i = 0; i < scene.nodes.size(); i++) {
+			//	const tinygltf::Node node = gltfModel.nodes[scene.nodes[i]];
+			//	loadNode(nullptr, node, scene.nodes[i], gltfModel, indexBuffer, vertexBuffer, scale);
+			//}
 #if 0
 			if (gltfModel.animations.size() > 0) {
 				loadAnimations(gltfModel);
