@@ -12,6 +12,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_MSC_SECURE_CRT
 
+// tinyusdz/src
+#include "io-util.hh"
 
 #include "VulkanUSDZModel.h"
 
@@ -427,16 +429,16 @@ namespace vkUSDZ
 		skins.resize(0);
 	};
 
-#if 0 // TODO
-	void Model::loadNode(vkUSDZ::Node *parent, const tinygltf::Node &node, uint32_t nodeIndex, const tinygltf::Model &model, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer, float globalscale)
+	void Model::loadNode(vkUSDZ::Node *parent, const tinyusdz::tydra::Node &node, uint32_t &nodeIndex, const tinyusdz::tydra::RenderScene &scene, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer, float globalscale)
 	{
 		vkUSDZ::Node *newNode = new Node{};
 		newNode->index = nodeIndex;
 		newNode->parent = parent;
-		newNode->name = node.name;
-		newNode->skinIndex = node.skin;
+		newNode->name = node.prim_name;
+		//newNode->skinIndex = node.skin_id;
 		newNode->matrix = glm::mat4(1.0f);
 
+#if 0 // TODO
 		// Generate local node matrix
 		glm::vec3 translation = glm::vec3(0.0f);
 		if (node.translation.size() == 3) {
@@ -456,17 +458,21 @@ namespace vkUSDZ
 		if (node.matrix.size() == 16) {
 			newNode->matrix = glm::make_mat4x4(node.matrix.data());
 		};
+#endif
 
 		// Node with children
 		if (node.children.size() > 0) {
 			for (size_t i = 0; i < node.children.size(); i++) {
-				loadNode(newNode, model.nodes[node.children[i]], node.children[i], model, indexBuffer, vertexBuffer, globalscale);
+				loadNode(newNode, node.children[i], nodeIndex, scene, indexBuffer, vertexBuffer, globalscale);
+				nodeIndex++;
 			}
 		}
 
 		// Node contains mesh data
-		if (node.mesh > -1) {
-			const tinygltf::Mesh mesh = model.meshes[node.mesh];
+		if ((node.nodeType == tinyusdz::tydra::NodeType::Mesh) && (node.id > -1)) {
+			const tinyusdz::tydra::RenderMesh &rmesh = scene.meshes[size_t(node.id)];
+			// Assume meshes are triangulated and have indices.
+			assert((rmesh.faceVertexIndices().size() % 3 == 0);
 			Mesh *newMesh = new Mesh(device, newNode->matrix);
 			for (size_t j = 0; j < mesh.primitives.size(); j++) {
 				const tinygltf::Primitive &primitive = mesh.primitives[j];
@@ -643,6 +649,7 @@ namespace vkUSDZ
 		linearNodes.push_back(newNode);
 	}
 
+#if 0 // TODO
 	void Model::loadSkins(tinygltf::Model &gltfModel)
 	{
 		for (tinygltf::Skin &source : gltfModel.skins) {
@@ -715,6 +722,7 @@ namespace vkUSDZ
     // TODO(syoyo): Return invalid value or raise an exception?
     return VK_SAMPLER_ADDRESS_MODE_REPEAT;
 	}
+
 #if 0
 
 	VkFilter Model::getVkFilterMode(int32_t filterMode)
@@ -737,7 +745,9 @@ namespace vkUSDZ
     // TODO(syoyo): Return invalid value or raise an exception?
     return VK_FILTER_LINEAR;
 	}
+#endif
 
+#if 0
 	void Model::loadTextureSamplers(tinygltf::Model &gltfModel)
 	{
 		for (tinygltf::Sampler smpl : gltfModel.samplers) {
@@ -978,24 +988,66 @@ namespace vkUSDZ
 			tinyusdz::tydra::RenderSceneConverterEnv env(stage);
 
 			// In default, RenderSceneConverter triangulate meshes and build single vertex index.
+			// You can explicitly enable triangulation and vertex-indices build by
 			//env.mesh_config.triangulate = true;
 			//env.mesh_config.build_vertex_indices = true;
+
+			std::string usd_basedir = tinyusdz::io::GetBaseDir(filename);
+
+			tinyusdz::USDZAsset usdz_asset;
+			if (is_usdz) {
+			  // Setup AssetResolutionResolver to read a asset(file) from memory.
+			  if (!tinyusdz::ReadUSDZAssetInfoFromFile(filename, &usdz_asset, &warning, &error)) {
+				std::cerr << "Failed to read USDZ assetInfo from file: " << error << "\n";
+				return;
+			  }
+			  if (warning.size()) {
+				std::cout << warning << "\n";
+			  }
+
+			  tinyusdz::AssetResolutionResolver arr;
+
+			  // NOTE: Pointer address of usdz_asset must be valid until the call of RenderSceneConverter::ConvertToRenderScene.
+			  if (!tinyusdz::SetupUSDZAssetResolution(arr, &usdz_asset)) {
+				std::cerr << "Failed to setup AssetResolution for USDZ asset\n";
+				return;
+			  };
+
+			  env.asset_resolver = arr;
+
+			} else {
+			  env.set_search_paths({usd_basedir});
+			}
+
+			env.timecode = tinyusdz::value::TimeCode::Default();
+			bool ret = converter.ConvertToRenderScene(env, &render_scene);
+			if (!ret) {
+			  std::cerr << "Failed to convert USD Stage to RenderScene: \n" << converter.GetError() << "\n";
+			  return;
+			}
+
+			if (converter.GetWarning().size()) {
+			  std::cout << "ConvertToRenderScene warn: " << converter.GetWarning() << "\n";
+			}
 
 			
 #if 0
 			loadTextureSamplers(gltfModel);
 			loadTextures(gltfModel, device, transferQueue);
 			loadMaterials(gltfModel);
+#endif
 			// TODO: scene handling with no default scene
 			const tinygltf::Scene &scene = gltfModel.scenes[gltfModel.defaultScene > -1 ? gltfModel.defaultScene : 0];
 			for (size_t i = 0; i < scene.nodes.size(); i++) {
 				const tinygltf::Node node = gltfModel.nodes[scene.nodes[i]];
 				loadNode(nullptr, node, scene.nodes[i], gltfModel, indexBuffer, vertexBuffer, scale);
 			}
+#if 0
 			if (gltfModel.animations.size() > 0) {
 				loadAnimations(gltfModel);
 			}
 			loadSkins(gltfModel);
+#endif
 
 			for (auto node : linearNodes) {
 				// Assign skins
@@ -1007,7 +1059,6 @@ namespace vkUSDZ
 					node->update();
 				}
 			}
-#endif
 		}
 		else {
 			// TODO: throw

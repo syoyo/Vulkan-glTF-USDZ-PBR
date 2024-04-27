@@ -243,7 +243,7 @@ namespace vkUSDZ
 		} dimensions;
 
 		void destroy(VkDevice device);
-		void loadNode(vkUSDZ::Node* parent, const tinyusdz::tydra::Node& node, uint32_t nodeIndex, const tinyusdz::tydra::RenderScene& scene, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer, float globalscale);
+		void loadNode(vkUSDZ::Node* parent, const tinyusdz::tydra::Node& node, /* inout */uint32_t &nodeIndex, const tinyusdz::tydra::RenderScene& scene, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer, float globalscale);
 #if 0
 		void loadSkins(tinygltf::Model& gltfModel);
 		void loadTextures(tinygltf::Model& gltfModel, vks::VulkanDevice* device, VkQueue transferQueue);

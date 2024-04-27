@@ -1,4 +1,4 @@
-# Vulkan physically-Based Rendering using glTF 2.0 models
+# Vulkan physically-Based Rendering using glTF 2.0 models and USDZ models
 
 <img src="./screenshots/damagedhelmet.jpg" width="644px"> <img src="./screenshots/polly.jpg" width="320px"> <img src="./screenshots/busterdrone.jpg" width="320px">
 
@@ -6,7 +6,7 @@
 
 ## About
 
-Physically-Based Rendering example implementation with image based lighting in Vulkan using glTF 2.0 models. The lighting equation is based on the [reference glTF PBR implementation](https://github.com/KhronosGroup/glTF-WebGL-PBR) from Khronos. 
+Physically-Based Rendering example implementation with image based lighting in Vulkan using glTF 2.0 models and USDZ models. The lighting equation is based on the [reference glTF PBR implementation](https://github.com/KhronosGroup/glTF-WebGL-PBR) from Khronos. 
 
 ## glTF 2.0 Model loading
 
@@ -36,6 +36,30 @@ To load a different scene instead, specify the glTF model file name as a command
 ```
 Vulkan-glTF-pbr "PATH-TO-glTF-Sample-Models\2.0\BrainStem\glTF\brainstem.gltf"
 ```
+
+## USDZ 2.0 Model loading
+
+Model loading is implemented in the [vkUSDZ::Model](./base/VulkanUSDZModel.hpp) class, using [TinyUSDZ library](https://github.com/syoyo/tinyusdz) to import the USDZ files(also, USDA and USDC are supported), so e.g. all file formats supported by TinyUSDZ are suported. This class converts the USD structures into Vulkan compatible structures used for setup and rendering.
+
+The following USD features are currently supported by the [vkUSDZ::Model](./base/VulkanUSDZModel.hpp) class:
+
+* [x] Loading USDA, USDC and USDZ models
+    * [x] Xform and Scope Prim hierarchy
+    * [x] GeomMesh(polygon only)
+      * [ ] per-face material using GeomSubset
+    * [x] Skinning(UsdSkel)
+    * [ ] BlendShapes(UsdSkel)
+      * [x] SkelRoot and Skeleton Prim
+    * [x] PBR material support
+        * [x] Metallic-Roughness workflow
+        * [x] Specular-Glossiness workflow (useSpecularWorkflow)
+    * [x] Animations   
+        * [x] Articulated (translate, rotate, scale) SkelAnimation
+        * [ ] BlendShape weights
+    * [x] Support for Draco mesh compression ([see instructions](#how-to-enable-draco-mesh-compression))
+
+Note that the model loader does not fully implement all aspects of the USD features, and as such there is no guarantee that all USDZ models work properly.
+
 
 ## Texture map generation
 
