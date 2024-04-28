@@ -11,6 +11,10 @@
 #include "vulkan/vulkan.h"
 
 #if defined(__ANDROID__)
+#include "VulkanAndroid.h"
+#endif
+
+#if defined(__ANDROID__)
 #define VK_CHECK_RESULT(f)																				\
 {																										\
 	VkResult res = (f);																					\
