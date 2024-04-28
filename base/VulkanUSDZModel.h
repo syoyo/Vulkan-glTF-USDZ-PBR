@@ -245,10 +245,10 @@ namespace vkUSDZ
 		void destroy(VkDevice device);
 		void loadNode(vkUSDZ::Node* parent, const tinyusdz::tydra::Node& node, /* inout */uint32_t &nodeIndex, const tinyusdz::tydra::RenderScene& scene, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer, float globalscale);
 		void loadMaterials(tinyusdz::tydra::RenderScene& scene);
+		void loadTextures(tinyusdz::tydra::RenderScene& scene, vks::VulkanDevice* device, VkQueue transferQueue);
+		void loadTextureSamplers(tinyusdz::tydra::RenderScene& scene);
 #if 0
 		void loadSkins(tinygltf::Model& gltfModel);
-		void loadTextures(tinygltf::Model& gltfModel, vks::VulkanDevice* device, VkQueue transferQueue);
-		void loadTextureSamplers(tinygltf::Model& gltfModel);
 		void loadAnimations(tinygltf::Model& gltfModel);
 #endif
 		VkSamplerAddressMode getVkWrapMode(tinyusdz::tydra::UVTexture::WrapMode mode);

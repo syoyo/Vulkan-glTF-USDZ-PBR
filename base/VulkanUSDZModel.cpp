@@ -669,28 +669,28 @@ namespace vkUSDZ
 		}
 	}
 
-	void Model::loadTextures(tinygltf::Model &gltfModel, vks::VulkanDevice *device, VkQueue transferQueue)
+#endif
+	void Model::loadTextures(tinyusdz::tydra::RenderScene &scene, vks::VulkanDevice *device, VkQueue transferQueue)
 	{
-		for (tinygltf::Texture &tex : gltfModel.textures) {
-			tinygltf::Image image = gltfModel.images[tex.source];
+		for (tinyusdz::tydra::UVTexture &tex : scene.textures) {
+			assert(tex.texture_image_id > -1);
+			tinyusdz::tydra::TextureImage &image = scene.images[tex.texture_image_id];
 			vkUSDZ::TextureSampler textureSampler;
-			if (tex.sampler == -1) {
-				// No sampler specified, use a default one
-				textureSampler.magFilter = VK_FILTER_LINEAR;
-				textureSampler.minFilter = VK_FILTER_LINEAR;
-				textureSampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-				textureSampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-				textureSampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-			}
-			else {
-				textureSampler = textureSamplers[tex.sampler];
-			}
+			// No sampler for USDZ texture for now, use a default one
+			textureSampler.magFilter = VK_FILTER_LINEAR;
+			textureSampler.minFilter = VK_FILTER_LINEAR;
+			textureSampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+			textureSampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+			textureSampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+			assert(image.buffer_id > -1);
+			tinyusdz::tydra::BufferData &buffer = scene.buffers[image.buffer_id];
+
 			vkUSDZ::Texture texture;
-			texture.fromglTfImage(image, textureSampler, device, transferQueue);
+			texture.fromUSDZImage(image, buffer.data, textureSampler, device, transferQueue);
 			textures.push_back(texture);
 		}
 	}
-#endif
 
 	VkSamplerAddressMode Model::getVkWrapMode(tinyusdz::tydra::UVTexture::WrapMode wrapMode)
 	{
@@ -734,20 +734,19 @@ namespace vkUSDZ
 	}
 #endif
 
-#if 0
-	void Model::loadTextureSamplers(tinygltf::Model &gltfModel)
+	void Model::loadTextureSamplers(tinyusdz::tydra::RenderScene &scene)
 	{
-		for (tinygltf::Sampler smpl : gltfModel.samplers) {
+		// UVTexture == Sampler 
+		for (tinyusdz::tydra::UVTexture &tex : scene.textures) {
 			vkUSDZ::TextureSampler sampler{};
-			sampler.minFilter = getVkFilterMode(smpl.minFilter);
-			sampler.magFilter = getVkFilterMode(smpl.magFilter);
-			sampler.addressModeU = getVkWrapMode(smpl.wrapS);
-			sampler.addressModeV = getVkWrapMode(smpl.wrapT);
+			sampler.minFilter = VK_FILTER_LINEAR;
+			sampler.magFilter = VK_FILTER_LINEAR;
+			sampler.addressModeU = getVkWrapMode(tex.wrapS);
+			sampler.addressModeV = getVkWrapMode(tex.wrapT);
 			sampler.addressModeW = sampler.addressModeV;
 			textureSamplers.push_back(sampler);
 		}
 	}
-#endif
 
 	void Model::loadMaterials(tinyusdz::tydra::RenderScene &scene)
 	{
@@ -1030,10 +1029,8 @@ namespace vkUSDZ
 			  std::cout << "ConvertToRenderScene warn: " << converter.GetWarning() << "\n";
 			}
 
-#if 0
-			loadTextureSamplers(gltfModel);
-			loadTextures(gltfModel, device, transferQueue);
-#endif
+			loadTextureSamplers(render_scene);
+			loadTextures(render_scene, device, transferQueue);
 			loadMaterials(render_scene);
 			// TODO: scene handling with no default scene
 			const tinyusdz::tydra::Node &root = render_scene.nodes[render_scene.default_root_node];

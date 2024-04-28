@@ -26,6 +26,7 @@
 #include "VulkanExampleBase.h"
 #include "VulkanTexture.hpp"
 #include "VulkanglTFModel.h"
+#include "VulkanUSDZModel.h"
 #include "VulkanUtils.hpp"
 #include "ui.hpp"
 
@@ -49,7 +50,8 @@ public:
 	} textures;
 
 	struct Models {
-		vkglTF::Model scene;
+		vkUSDZ::Model scene;
+		vkglTF::Model gltf_scene;
 		vkglTF::Model skybox;
 	} models;
 
@@ -111,7 +113,7 @@ public:
 	bool animate = true;
 
 	bool displayBackground = true;
-	
+
 	struct LightSource {
 		glm::vec3 color = glm::vec3(1.0f);
 		glm::vec3 rotation = glm::vec3(75.0f, 40.0f, 0.0f);
@@ -219,7 +221,7 @@ public:
 					vkCmdBindDescriptorSets(commandBuffers[cbIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, static_cast<uint32_t>(descriptorsets.size()), descriptorsets.data(), 0, NULL);
 
 					// Pass material parameters as push constants
-					PushConstBlockMaterial pushConstBlockMaterial{};					
+					PushConstBlockMaterial pushConstBlockMaterial{};
 					pushConstBlockMaterial.emissiveFactor = primitive->material.emissiveFactor;
 					// To save push constant space, availabilty and texture coordiante set are combined
 					// -1 = texture not used for this material, >= 0 texture used and index of texture coordinate set
@@ -228,6 +230,68 @@ public:
 					pushConstBlockMaterial.occlusionTextureSet = primitive->material.occlusionTexture != nullptr ? primitive->material.texCoordSets.occlusion : -1;
 					pushConstBlockMaterial.emissiveTextureSet = primitive->material.emissiveTexture != nullptr ? primitive->material.texCoordSets.emissive : -1;
 					pushConstBlockMaterial.alphaMask = static_cast<float>(primitive->material.alphaMode == vkglTF::Material::ALPHAMODE_MASK);
+					pushConstBlockMaterial.alphaMaskCutoff = primitive->material.alphaCutoff;
+
+					// TODO: glTF specs states that metallic roughness should be preferred, even if specular glosiness is present
+
+					if (primitive->material.pbrWorkflows.metallicRoughness) {
+						// Metallic roughness workflow
+						pushConstBlockMaterial.workflow = static_cast<float>(PBR_WORKFLOW_METALLIC_ROUGHNESS);
+						pushConstBlockMaterial.baseColorFactor = primitive->material.baseColorFactor;
+						pushConstBlockMaterial.metallicFactor = primitive->material.metallicFactor;
+						pushConstBlockMaterial.roughnessFactor = primitive->material.roughnessFactor;
+						pushConstBlockMaterial.PhysicalDescriptorTextureSet = primitive->material.metallicRoughnessTexture != nullptr ? primitive->material.texCoordSets.metallicRoughness : -1;
+						pushConstBlockMaterial.colorTextureSet = primitive->material.baseColorTexture != nullptr ? primitive->material.texCoordSets.baseColor : -1;
+					}
+
+					if (primitive->material.pbrWorkflows.specularGlossiness) {
+						// Specular glossiness workflow
+						pushConstBlockMaterial.workflow = static_cast<float>(PBR_WORKFLOW_SPECULAR_GLOSINESS);
+						pushConstBlockMaterial.PhysicalDescriptorTextureSet = primitive->material.extension.specularGlossinessTexture != nullptr ? primitive->material.texCoordSets.specularGlossiness : -1;
+						pushConstBlockMaterial.colorTextureSet = primitive->material.extension.diffuseTexture != nullptr ? primitive->material.texCoordSets.baseColor : -1;
+						pushConstBlockMaterial.diffuseFactor = primitive->material.extension.diffuseFactor;
+						pushConstBlockMaterial.specularFactor = glm::vec4(primitive->material.extension.specularFactor, 1.0f);
+					}
+
+					vkCmdPushConstants(commandBuffers[cbIndex], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstBlockMaterial), &pushConstBlockMaterial);
+
+					if (primitive->hasIndices) {
+						vkCmdDrawIndexed(commandBuffers[cbIndex], primitive->indexCount, 1, primitive->firstIndex, 0, 0);
+					} else {
+						vkCmdDraw(commandBuffers[cbIndex], primitive->vertexCount, 1, 0, 0);
+					}
+				}
+			}
+
+		};
+		for (auto child : node->children) {
+			renderNode(child, cbIndex, alphaMode);
+		}
+	}
+
+	void renderNode(vkUSDZ::Node *node, uint32_t cbIndex, vkUSDZ::Material::AlphaMode alphaMode) {
+		if (node->mesh) {
+			// Render mesh primitives
+			for (vkUSDZ::Primitive * primitive : node->mesh->primitives) {
+				if (primitive->material.alphaMode == alphaMode) {
+
+					const std::vector<VkDescriptorSet> descriptorsets = {
+						descriptorSets[cbIndex].scene,
+						primitive->material.descriptorSet,
+						node->mesh->uniformBuffer.descriptorSet,
+					};
+					vkCmdBindDescriptorSets(commandBuffers[cbIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, static_cast<uint32_t>(descriptorsets.size()), descriptorsets.data(), 0, NULL);
+
+					// Pass material parameters as push constants
+					PushConstBlockMaterial pushConstBlockMaterial{};
+					pushConstBlockMaterial.emissiveFactor = primitive->material.emissiveFactor;
+					// To save push constant space, availabilty and texture coordiante set are combined
+					// -1 = texture not used for this material, >= 0 texture used and index of texture coordinate set
+					pushConstBlockMaterial.colorTextureSet = primitive->material.baseColorTexture != nullptr ? primitive->material.texCoordSets.baseColor : -1;
+					pushConstBlockMaterial.normalTextureSet = primitive->material.normalTexture != nullptr ? primitive->material.texCoordSets.normal : -1;
+					pushConstBlockMaterial.occlusionTextureSet = primitive->material.occlusionTexture != nullptr ? primitive->material.texCoordSets.occlusion : -1;
+					pushConstBlockMaterial.emissiveTextureSet = primitive->material.emissiveTexture != nullptr ? primitive->material.texCoordSets.emissive : -1;
+					pushConstBlockMaterial.alphaMask = static_cast<float>(primitive->material.alphaMode == vkUSDZ::Material::ALPHAMODE_MASK);
 					pushConstBlockMaterial.alphaMaskCutoff = primitive->material.alphaCutoff;
 
 					// TODO: glTF specs states that metallic roughness should be preferred, even if specular glosiness is present
@@ -322,7 +386,7 @@ public:
 
 			vkCmdBindPipeline(currentCB, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr);
 
-			vkglTF::Model &model = models.scene;
+			vkUSDZ::Model &model = models.scene;
 
 			vkCmdBindVertexBuffers(currentCB, 0, 1, &model.vertices.buffer, offsets);
 			if (model.indices.buffer != VK_NULL_HANDLE) {
@@ -331,17 +395,17 @@ public:
 
 			// Opaque primitives first
 			for (auto node : model.nodes) {
-				renderNode(node, i, vkglTF::Material::ALPHAMODE_OPAQUE);
+				renderNode(node, i, vkUSDZ::Material::ALPHAMODE_OPAQUE);
 			}
 			// Alpha masked primitives
 			for (auto node : model.nodes) {
-				renderNode(node, i, vkglTF::Material::ALPHAMODE_MASK);
+				renderNode(node, i, vkUSDZ::Material::ALPHAMODE_MASK);
 			}
 			// Transparent primitives
 			// TODO: Correct depth sorting
 			vkCmdBindPipeline(currentCB, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbrAlphaBlend);
 			for (auto node : model.nodes) {
-				renderNode(node, i, vkglTF::Material::ALPHAMODE_BLEND);
+				renderNode(node, i, vkUSDZ::Material::ALPHAMODE_BLEND);
 			}
 
 			// User interface
@@ -352,13 +416,17 @@ public:
 		}
 	}
 
-	void loadScene(std::string filename)
+	void loadScene(std::string filename, bool is_usdz = true)
 	{
 		std::cout << "Loading scene from " << filename << std::endl;
 		models.scene.destroy(device);
 		animationIndex = 0;
 		animationTimer = 0.0f;
-		models.scene.loadFromFile(filename, vulkanDevice, queue);
+		if (is_usdz) {
+			models.scene.loadFromFile(filename, vulkanDevice, queue);
+		} else {
+			models.gltf_scene.loadFromFile(filename, vulkanDevice, queue);
+		}
 		camera.setPosition({ 0.0f, 0.0f, 1.0f });
 		camera.setRotation({ 0.0f, 0.0f, 0.0f });
 	}
@@ -375,11 +443,12 @@ public:
 		generateCubemaps();
 	}
 
-	void loadAssets()
+	void loadAssets(bool use_usdz = true)
 	{
+		std::string ext = use_usdz ? ".usdz" : ".gltf";
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
 		tinygltf::asset_manager = androidApp->activity->assetManager;
-		readDirectory(assetpath + "models", "*.gltf", scenes, true);
+		readDirectory(assetpath + "models", "*" + ext, scenes, true);
 #else
 		const std::string assetpath = "./../data/";
 		struct stat info;
@@ -393,10 +462,15 @@ public:
 
 		textures.empty.loadFromFile(assetpath + "textures/empty.ktx", VK_FORMAT_R8G8B8A8_UNORM, vulkanDevice, queue);
 
-		std::string sceneFile = assetpath + "models/DamagedHelmet/glTF-Embedded/DamagedHelmet.gltf";
+		std::string sceneFile;
+		if (use_usdz) {
+			sceneFile = assetpath + "models/DamagedHelmet/USDZ/DamagedHelmet.usdz";
+		} else {
+			sceneFile = assetpath + "models/DamagedHelmet/glTF-Embedded/DamagedHelmet.gltf";
+		}
 		std::string envMapFile = assetpath + "environments/papermill.ktx";
 		for (size_t i = 0; i < args.size(); i++) {
-			if (std::string(args[i]).find(".gltf") != std::string::npos) {
+			if (std::string(args[i]).find(ext) != std::string::npos) {
 				std::ifstream file(args[i]);
 				if (file.good()) {
 					sceneFile = args[i];
@@ -445,6 +519,30 @@ public:
 		}
 	}
 
+	void setupNodeDescriptorSet(vkUSDZ::Node *node) {
+		if (node->mesh) {
+			VkDescriptorSetAllocateInfo descriptorSetAllocInfo{};
+			descriptorSetAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			descriptorSetAllocInfo.descriptorPool = descriptorPool;
+			descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayouts.node;
+			descriptorSetAllocInfo.descriptorSetCount = 1;
+			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &node->mesh->uniformBuffer.descriptorSet));
+
+			VkWriteDescriptorSet writeDescriptorSet{};
+			writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			writeDescriptorSet.descriptorCount = 1;
+			writeDescriptorSet.dstSet = node->mesh->uniformBuffer.descriptorSet;
+			writeDescriptorSet.dstBinding = 0;
+			writeDescriptorSet.pBufferInfo = &node->mesh->uniformBuffer.descriptor;
+
+			vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+		}
+		for (auto& child : node->children) {
+			setupNodeDescriptorSet(child);
+		}
+	}
+
 	void setupDescriptors()
 	{
 		/*
@@ -457,16 +555,24 @@ public:
 		// Environment samplers (radiance, irradiance, brdf lut)
 		imageSamplerCount += 3;
 
-		std::vector<vkglTF::Model*> modellist = { &models.skybox, &models.scene };
-		for (auto &model : modellist) {
-			for (auto &material : model->materials) {
-				imageSamplerCount += 5;
-				materialCount++;
+		//std::vector<vkUSDZ::Model*> modellist = { &models.skybox, &models.scene };
+		for (auto &material : models.skybox.materials) {
+			imageSamplerCount += 5;
+			materialCount++;
+		}
+		for (auto node : models.skybox.linearNodes) {
+			if (node->mesh) {
+				meshCount++;
 			}
-			for (auto node : model->linearNodes) {
-				if (node->mesh) {
-					meshCount++;
-				}
+		}
+
+		for (auto &material : models.scene.materials) {
+			imageSamplerCount += 5;
+			materialCount++;
+		}
+		for (auto node : models.scene.linearNodes) {
+			if (node->mesh) {
+				meshCount++;
 			}
 		}
 
@@ -737,7 +843,7 @@ public:
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
 
 		// Vertex bindings an attributes
-		VkVertexInputBindingDescription vertexInputBinding = { 0, sizeof(vkglTF::Model::Vertex), VK_VERTEX_INPUT_RATE_VERTEX };
+		VkVertexInputBindingDescription vertexInputBinding = { 0, sizeof(vkUSDZ::Model::Vertex), VK_VERTEX_INPUT_RATE_VERTEX };
 		std::vector<VkVertexInputAttributeDescription> vertexInputAttributes = {
 			{ 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 },
 			{ 1, 0, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 3 },
@@ -987,7 +1093,7 @@ public:
 		dynamicStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 		dynamicStateCI.pDynamicStates = dynamicStateEnables.data();
 		dynamicStateCI.dynamicStateCount = static_cast<uint32_t>(dynamicStateEnables.size());
-		
+
 		VkPipelineVertexInputStateCreateInfo emptyInputStateCI{};
 		emptyInputStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
@@ -1008,7 +1114,7 @@ public:
 		pipelineCI.stageCount = 2;
 		pipelineCI.pStages = shaderStages.data();
 
-		// Look-up-table (from BRDF) pipeline		
+		// Look-up-table (from BRDF) pipeline
 		shaderStages = {
 			loadShader(device, "genbrdflut.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
 			loadShader(device, "genbrdflut.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
@@ -1071,7 +1177,7 @@ public:
 	}
 
 	/*
-		Offline generation for the cube maps used for PBR lighting		
+		Offline generation for the cube maps used for PBR lighting
 		- Irradiance cube map
 		- Pre-filterd environment cubemap
 	*/
@@ -1382,7 +1488,7 @@ public:
 			VkPipelineMultisampleStateCreateInfo multisampleStateCI{};
 			multisampleStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 			multisampleStateCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-			
+
 			std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 			VkPipelineDynamicStateCreateInfo dynamicStateCI{};
 			dynamicStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -1390,7 +1496,7 @@ public:
 			dynamicStateCI.dynamicStateCount = static_cast<uint32_t>(dynamicStateEnables.size());
 
 			// Vertex input state
-			VkVertexInputBindingDescription vertexInputBinding = { 0, sizeof(vkglTF::Model::Vertex), VK_VERTEX_INPUT_RATE_VERTEX };
+			VkVertexInputBindingDescription vertexInputBinding = { 0, sizeof(vkUSDZ::Model::Vertex), VK_VERTEX_INPUT_RATE_VERTEX };
 			VkVertexInputAttributeDescription vertexInputAttribute = { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 };
 
 			VkPipelineVertexInputStateCreateInfo vertexInputStateCI{};
@@ -1631,7 +1737,7 @@ public:
 		}
 	}
 
-	/* 
+	/*
 		Prepare and initialize uniform buffers containing shader parameters
 	*/
 	void prepareUniformBuffers()
@@ -1649,7 +1755,7 @@ public:
 		// Scene
 		shaderValuesScene.projection = camera.matrices.perspective;
 		shaderValuesScene.view = camera.matrices.view;
-		
+
 		// Center and scale model
 		float scale = (1.0f / std::max(models.scene.aabb[0][0], std::max(models.scene.aabb[1][1], models.scene.aabb[2][2]))) * 0.5f;
 		glm::vec3 translate = -glm::vec3(models.scene.aabb[3][0], models.scene.aabb[3][1], models.scene.aabb[3][2]);
