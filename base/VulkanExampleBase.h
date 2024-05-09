@@ -243,7 +243,7 @@ public:
 	void initVulkan();
 
 	virtual VkResult createInstance(bool enableValidation);
-	virtual void render() = 0;
+	virtual void render(bool is_usdz) = 0;
 	virtual void windowResized();
 	virtual void setupFrameBuffer();
 	virtual void prepare();

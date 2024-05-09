@@ -303,7 +303,8 @@ void VulkanExampleBase::renderFrame()
 {
 	auto tStart = std::chrono::high_resolution_clock::now();
 
-	render();
+	bool is_usdz = true; // FIXME
+	render(is_usdz);
 	frameCounter++;
 	auto tEnd = std::chrono::high_resolution_clock::now();
 	auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();

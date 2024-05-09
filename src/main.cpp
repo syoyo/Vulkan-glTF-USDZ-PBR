@@ -378,16 +378,16 @@ public:
 
       // Opaque primitives first
       for (auto node : model.nodes) {
-        renderNode(node, currentFrame, vkglTF::Material::ALPHAMODE_OPAQUE);
+        renderNode(node, currentFrame, vkUSDZ::Material::ALPHAMODE_OPAQUE);
       }
       // Alpha masked primitives
       for (auto node : model.nodes) {
-        renderNode(node, currentFrame, vkglTF::Material::ALPHAMODE_MASK);
+        renderNode(node, currentFrame, vkUSDZ::Material::ALPHAMODE_MASK);
       }
       // Transparent primitives
       // TODO: Correct depth sorting
       for (auto node : model.nodes) {
-        renderNode(node, currentFrame, vkglTF::Material::ALPHAMODE_BLEND);
+        renderNode(node, currentFrame, vkUSDZ::Material::ALPHAMODE_BLEND);
       }
 		} else {
       vkglTF::Model &model = models.gltf_scene;

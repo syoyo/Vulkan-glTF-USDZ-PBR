@@ -93,12 +93,12 @@ namespace vkUSDZ
 		float roughnessFactor = 1.0f;
 		glm::vec4 baseColorFactor = glm::vec4(1.0f);
 		glm::vec4 emissiveFactor = glm::vec4(1.0f);
-		float emissiveStrength = 1.0f;
 		vkUSDZ::Texture *baseColorTexture;
 		vkUSDZ::Texture *metallicRoughnessTexture;
 		vkUSDZ::Texture *normalTexture;
 		vkUSDZ::Texture *occlusionTexture;
 		vkUSDZ::Texture *emissiveTexture;
+		bool doubleSided = false;
 		struct TexCoordSets {
 			uint8_t baseColor = 0;
 			uint8_t metallicRoughness = 0;
@@ -118,6 +118,9 @@ namespace vkUSDZ
 			bool specularGlossiness = false;
 		} pbrWorkflows;
 		VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+		int index = 0;
+		bool unlit = false;
+		float emissiveStrength = 1.0f;
 	};
 
 	struct Primitive {
