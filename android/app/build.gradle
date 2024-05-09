@@ -2,16 +2,16 @@ apply plugin: 'com.android.application'
 
 android {
     namespace "de.saschawillems.vulkanglTFPBR"
-    compileSdkVersion 26
+    compileSdkVersion 33
     defaultConfig {
         applicationId "de.saschawillems.vulkanglTFPBR"
-        minSdkVersion 19
-        targetSdkVersion 26
+        minSdkVersion 26
+        targetSdkVersion 33
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
         ndk {
-            abiFilters "arm64-v8a"
+            abiFilters "arm64-v8a", "armabi-v7a", "x86_64"
         }
         externalNativeBuild {
             cmake {

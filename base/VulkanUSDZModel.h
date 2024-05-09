@@ -93,6 +93,7 @@ namespace vkUSDZ
 		float roughnessFactor = 1.0f;
 		glm::vec4 baseColorFactor = glm::vec4(1.0f);
 		glm::vec4 emissiveFactor = glm::vec4(1.0f);
+		float emissiveStrength = 1.0f;
 		vkUSDZ::Texture *baseColorTexture;
 		vkUSDZ::Texture *metallicRoughnessTexture;
 		vkUSDZ::Texture *normalTexture;
