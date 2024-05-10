@@ -522,6 +522,7 @@ public:
 
 	void loadAssets(bool use_usdz = true)
 	{
+        std::string ext = use_usdz ? ".usdz" : "gltf";
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
 		tinygltf::asset_manager = androidApp->activity->assetManager;
 		readDirectory(assetpath + "models", "*" + ext, scenes, true);

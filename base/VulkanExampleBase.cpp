@@ -373,7 +373,9 @@ void VulkanExampleBase::renderLoop()
 		if (prepared)
 		{
 			auto tStart = std::chrono::high_resolution_clock::now();
-			render();
+            // FIXME: Set is_usdz when we read USDZ file
+            bool is_usdz = true;
+			render(is_usdz);
 			frameCounter++;
 			auto tEnd = std::chrono::high_resolution_clock::now();
 			auto tDiff = std::chrono::duration<double, std::milli>(tEnd - tStart).count();
