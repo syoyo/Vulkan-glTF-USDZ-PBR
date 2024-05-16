@@ -1,14 +1,12 @@
 /**
  * Vulkan glTF model and texture loading class based on tinyglTF (https://github.com/syoyo/tinygltf)
  *
- * Copyright (C) 2018-2021 by Sascha Willems - www.saschawillems.de
+ * Copyright (C) 2018-2024 by Sascha Willems - www.saschawillems.de
  *
  * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
  */
 
-/*
- * USDZ loader modification by Syoyo Fujita
- */
+// Added USDZ(and USDA/USDC) loading suport by Syoyo Fujita.
 
 #pragma once
 
@@ -35,14 +33,16 @@
 #pragma message ("ERROR constant already defined, undefining")
 #endif
 
-
-// TinyUSDZ headers
-#include "tinyusdz.hh"
-#include "tydra/render-data.hh"
+//#define TINYGLTF_NO_STB_IMAGE_WRITE
 
 #if defined(__ANDROID__)
+#define TINYGLTF_ANDROID_LOAD_FROM_ASSETS
 #include <android/asset_manager.h>
 #endif
+
+//#include "tiny_gltf.h"
+#include "tinyusdz.hh"
+#include "tydra/render-data.hh"
 
 // Changing this value here also requires changing it in the vertex shader
 #define MAX_NUM_JOINTS 128u
@@ -81,8 +81,8 @@ namespace vkUSDZ
 		VkSampler sampler;
 		void updateDescriptor();
 		void destroy();
-		// Load a texture from a USDZ image (Texture info + texel data stored as vector of chars) and generate a full mip chaing for it
-		void fromUSDZImage(tinyusdz::tydra::TextureImage& usdzimage, const std::vector<uint8_t> &texturedata, TextureSampler textureSampler, vks::VulkanDevice* device, VkQueue copyQueue);
+		// Load a texture from Tydra RenderScene image (stored as vector of chars loaded via stb_image/tinyexr/etc) and generate a full mip chaing for it
+	  void fromUSDZImage(tinyusdz::tydra::TextureImage &usdzimage, const std::vector<uint8_t> &imaedata, TextureSampler textureSampler, vks::VulkanDevice *device, VkQueue copyQueue);
 	};
 
 	struct Material {		
@@ -92,12 +92,13 @@ namespace vkUSDZ
 		float metallicFactor = 1.0f;
 		float roughnessFactor = 1.0f;
 		glm::vec4 baseColorFactor = glm::vec4(1.0f);
-		glm::vec4 emissiveFactor = glm::vec4(1.0f);
+		glm::vec4 emissiveFactor = glm::vec4(0.0f);
 		vkUSDZ::Texture *baseColorTexture;
 		vkUSDZ::Texture *metallicRoughnessTexture;
 		vkUSDZ::Texture *normalTexture;
 		vkUSDZ::Texture *occlusionTexture;
 		vkUSDZ::Texture *emissiveTexture;
+		bool doubleSided = false;
 		struct TexCoordSets {
 			uint8_t baseColor = 0;
 			uint8_t metallicRoughness = 0;
@@ -117,6 +118,9 @@ namespace vkUSDZ
 			bool specularGlossiness = false;
 		} pbrWorkflows;
 		VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
+		int index = 0;
+		bool unlit = false;
+		float emissiveStrength = 1.0f;
 	};
 
 	struct Primitive {
@@ -173,6 +177,9 @@ namespace vkUSDZ
 		glm::quat rotation{};
 		BoundingBox bvh;
 		BoundingBox aabb;
+		bool useCachedMatrix{ false };
+		glm::mat4 cachedLocalMatrix{ glm::mat4(1.0f) };
+		glm::mat4 cachedMatrix{ glm::mat4(1.0f) };
 		glm::mat4 localMatrix();
 		glm::mat4 getMatrix();
 		void update();
@@ -212,6 +219,7 @@ namespace vkUSDZ
 			glm::vec2 uv1;
 			glm::vec4 joint0;
 			glm::vec4 weight0;
+			glm::vec4 color;
 		};
 
 		struct Vertices {
@@ -219,7 +227,6 @@ namespace vkUSDZ
 			VkDeviceMemory memory;
 		} vertices;
 		struct Indices {
-			int count;
 			VkBuffer buffer = VK_NULL_HANDLE;
 			VkDeviceMemory memory;
 		} indices;
@@ -235,25 +242,34 @@ namespace vkUSDZ
 		std::vector<TextureSampler> textureSamplers;
 		std::vector<Material> materials;
 		std::vector<Animation> animations;
-		//std::vector<std::string> extensions;
+		std::vector<std::string> extensions;
 
 		struct Dimensions {
 			glm::vec3 min = glm::vec3(FLT_MAX);
 			glm::vec3 max = glm::vec3(-FLT_MAX);
 		} dimensions;
 
+		struct LoaderInfo {
+			uint32_t* indexBuffer;
+			Vertex* vertexBuffer;
+			size_t indexPos = 0;
+			size_t vertexPos = 0;
+		};
+
 		void destroy(VkDevice device);
-		void loadNode(vkUSDZ::Node* parent, const tinyusdz::tydra::Node& node, /* inout */uint32_t &nodeIndex, const tinyusdz::tydra::RenderScene& scene, std::vector<uint32_t>& indexBuffer, std::vector<Vertex>& vertexBuffer, float globalscale);
-		void loadMaterials(tinyusdz::tydra::RenderScene& scene);
-		void loadTextures(tinyusdz::tydra::RenderScene& scene, vks::VulkanDevice* device, VkQueue transferQueue);
-		void loadTextureSamplers(tinyusdz::tydra::RenderScene& scene);
-#if 0
-		void loadSkins(tinygltf::Model& gltfModel);
-		void loadAnimations(tinygltf::Model& gltfModel);
+		void loadNode(vkUSDZ::Node *parent, const tinyusdz::tydra::Node &node, uint32_t &nodeIndex, const tinyusdz::tydra::RenderScene &scene, LoaderInfo& loaderInfo, float globalscale);
+		void getNodeProps(const tinyusdz::tydra::Node& node, const tinyusdz::tydra::RenderScene& scene, size_t& vertexCount, size_t& indexCount);
+#if 0 // TODO
+		void loadSkins(tinyusdz::tydra::RenderScene& scene);
 #endif
-		VkSamplerAddressMode getVkWrapMode(tinyusdz::tydra::UVTexture::WrapMode mode);
-    // No texture filtering in UsdUVTexture for now
-		//VkFilter getVkFilterMode(itinnt32_t filterMode);
+		void loadTextures(tinyusdz::tydra::RenderScene& scene, vks::VulkanDevice* device, VkQueue transferQueue);
+    VkSamplerAddressMode getVkWrapMode(tinyusdz::tydra::UVTexture::WrapMode wrapMode);
+		VkFilter getVkFilterMode(int32_t filterMode);
+		void loadTextureSamplers(tinyusdz::tydra::RenderScene& scene);
+    void loadMaterials(tinyusdz::tydra::RenderScene &scene);
+#if 0 // TODO
+		void loadAnimations(tinyusdz::Model& gltfModel);
+#endif
 		void loadFromFile(std::string filename, vks::VulkanDevice* device, VkQueue transferQueue, float scale = 1.0f);
 		void drawNode(Node* node, VkCommandBuffer commandBuffer);
 		void draw(VkCommandBuffer commandBuffer);
