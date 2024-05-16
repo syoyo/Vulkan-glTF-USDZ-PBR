@@ -40,7 +40,7 @@ IF(EXISTS ${CMAKE_SOURCE_DIR}/external/draco/draco_features.h)
 ENDIF()
 
 add_subdirectory(${CMAKE_SOURCE_DIR}/external/tinyusdz tinyusdz_build EXCLUDE_FROM_ALL)
-set(TINYUSDZ_LIBRARY tinyusdz_static)
+set(TINYUSDZ_LIBRARY tinyusdz::tinyusdz_static)
 
 # Use FindVulkan module added with CMAKE 3.7
 if (NOT CMAKE_VERSION VERSION_LESS 3.7.0)

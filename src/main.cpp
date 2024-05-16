@@ -23,6 +23,7 @@
 #include "VulkanExampleBase.h"
 #include "VulkanTexture.hpp"
 #include "VulkanglTFModel.h"
+#include "VulkanUSDZModel.h"
 #include "VulkanUtils.hpp"
 #include "ui.hpp"
 
@@ -47,6 +48,7 @@ public:
 
 	struct Models {
 		vkglTF::Model scene;
+		vkUSDZ::Model usdz_scene;
 		vkglTF::Model skybox;
 	} models;
 
@@ -178,6 +180,7 @@ public:
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.node, nullptr);
 
 		models.scene.destroy(device);
+		models.usdz_scene.destroy(device);
 		models.skybox.destroy(device);
 
 		for (auto buffer : uniformBuffers) {
@@ -208,6 +211,60 @@ public:
 		camera.setPosition({ 0.0f, 0.0f, 1.0f });
 		camera.setRotation({ 0.0f, 0.0f, 0.0f });
 		camera.updateViewMatrix();
+	}
+
+	void renderNodeUSDZ(vkUSDZ::Node *node, uint32_t cbIndex, vkUSDZ::Material::AlphaMode alphaMode) {
+		if (node->mesh) {
+			// Render mesh primitives
+			for (vkUSDZ::Primitive * primitive : node->mesh->primitives) {
+				if (primitive->material.alphaMode == alphaMode) {
+					std::string pipelineName = "pbr";
+					std::string pipelineVariant = "";
+
+					if (primitive->material.unlit) {
+						// KHR_materials_unlit
+						pipelineName = "unlit";
+					};
+
+					// Material properties define if we e.g. need to bind a pipeline variant with culling disabled (double sided)
+					if (alphaMode == vkglTF::Material::ALPHAMODE_BLEND) {
+						pipelineVariant = "_alpha_blending";
+					} else {
+						if (primitive->material.doubleSided) {
+							pipelineVariant = "_double_sided";
+						}
+					}
+
+					const VkPipeline pipeline = pipelines[pipelineName + pipelineVariant];
+
+					if (pipeline != boundPipeline) {
+						vkCmdBindPipeline(commandBuffers[cbIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+						boundPipeline = pipeline;
+					}
+
+					const std::vector<VkDescriptorSet> descriptorsets = {
+						descriptorSets[cbIndex].scene,
+						primitive->material.descriptorSet,
+						node->mesh->uniformBuffer.descriptorSet,
+						descriptorSetMaterials
+					};
+					vkCmdBindDescriptorSets(commandBuffers[cbIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, static_cast<uint32_t>(descriptorsets.size()), descriptorsets.data(), 0, NULL);
+
+					// Pass material index for this primitive using a push constant, the shader uses this to index into the material buffer
+					vkCmdPushConstants(commandBuffers[cbIndex], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(uint32_t), &primitive->material.index);
+
+					if (primitive->hasIndices) {
+						vkCmdDrawIndexed(commandBuffers[cbIndex], primitive->indexCount, 1, primitive->firstIndex, 0, 0);
+					} else {
+						vkCmdDraw(commandBuffers[cbIndex], primitive->vertexCount, 1, 0, 0);
+					}
+				}
+			}
+
+		};
+		for (auto child : node->children) {
+			renderNodeUSDZ(child, cbIndex, alphaMode);
+		}
 	}
 
 	void renderNode(vkglTF::Node *node, uint32_t cbIndex, vkglTF::Material::AlphaMode alphaMode) {
@@ -262,6 +319,89 @@ public:
 		for (auto child : node->children) {
 			renderNode(child, cbIndex, alphaMode);
 		}
+	}
+
+	void recordCommandBufferUSDZ()
+	{
+		vkResetCommandBuffer(commandBuffers[currentFrame], 0);
+
+		VkCommandBufferBeginInfo cmdBufferBeginInfo{};
+		cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+		VkClearValue clearValues[3];
+		if (settings.multiSampling) {
+			clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+			clearValues[1].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+			clearValues[2].depthStencil = { 1.0f, 0 };
+		}
+		else {
+			clearValues[0].color = { { 0.0f, 0.0f, 0.0f, 1.0f } };
+			clearValues[1].depthStencil = { 1.0f, 0 };
+		}
+
+		VkRenderPassBeginInfo renderPassBeginInfo{};
+		renderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+		renderPassBeginInfo.renderPass = renderPass;
+		renderPassBeginInfo.renderArea.offset.x = 0;
+		renderPassBeginInfo.renderArea.offset.y = 0;
+		renderPassBeginInfo.renderArea.extent.width = width;
+		renderPassBeginInfo.renderArea.extent.height = height;
+		renderPassBeginInfo.clearValueCount = settings.multiSampling ? 3 : 2;
+		renderPassBeginInfo.pClearValues = clearValues;
+		renderPassBeginInfo.framebuffer = frameBuffers[imageIndex];
+
+		VkCommandBuffer currentCB = commandBuffers[currentFrame];
+
+		VK_CHECK_RESULT(vkBeginCommandBuffer(currentCB, &cmdBufferBeginInfo));
+		vkCmdBeginRenderPass(currentCB, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+		VkViewport viewport{};
+		viewport.width = (float)width;
+		viewport.height = (float)height;
+		viewport.minDepth = 0.0f;
+		viewport.maxDepth = 1.0f;
+		vkCmdSetViewport(currentCB, 0, 1, &viewport);
+
+		VkRect2D scissor{};
+		scissor.extent = { width, height };
+		vkCmdSetScissor(currentCB, 0, 1, &scissor);
+
+		VkDeviceSize offsets[1] = { 0 };
+
+		if (displayBackground) {
+			vkCmdBindDescriptorSets(currentCB, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame].skybox, 0, nullptr);
+			vkCmdBindPipeline(currentCB, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines["skybox"]);
+			models.skybox.draw(currentCB);
+		}
+
+		vkUSDZ::Model &model = models.usdz_scene;
+
+		vkCmdBindVertexBuffers(currentCB, 0, 1, &model.vertices.buffer, offsets);
+		if (model.indices.buffer != VK_NULL_HANDLE) {
+			vkCmdBindIndexBuffer(currentCB, model.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+		}
+
+		boundPipeline = VK_NULL_HANDLE;
+
+		// Opaque primitives first
+		for (auto node : model.nodes) {
+			renderNodeUSDZ(node, currentFrame, vkUSDZ::Material::ALPHAMODE_OPAQUE);
+		}
+		// Alpha masked primitives
+		for (auto node : model.nodes) {
+			renderNodeUSDZ(node, currentFrame, vkUSDZ::Material::ALPHAMODE_MASK);
+		}
+		// Transparent primitives
+		// TODO: Correct depth sorting
+		for (auto node : model.nodes) {
+			renderNodeUSDZ(node, currentFrame, vkUSDZ::Material::ALPHAMODE_BLEND);
+		}
+
+		// User interface
+		ui->draw(currentCB);
+
+		vkCmdEndRenderPass(currentCB);
+		VK_CHECK_RESULT(vkEndCommandBuffer(currentCB));
 	}
 
 	void recordCommandBuffer()
@@ -354,6 +494,71 @@ public:
 	{
 		std::vector<ShaderMaterial> shaderMaterials{};
 		for (auto& material : models.scene.materials) {
+			ShaderMaterial shaderMaterial{};
+
+			shaderMaterial.emissiveFactor = material.emissiveFactor;
+			// To save space, availabilty and texture coordinate set are combined
+			// -1 = texture not used for this material, >= 0 texture used and index of texture coordinate set
+			shaderMaterial.colorTextureSet = material.baseColorTexture != nullptr ? material.texCoordSets.baseColor : -1;
+			shaderMaterial.normalTextureSet = material.normalTexture != nullptr ? material.texCoordSets.normal : -1;
+			shaderMaterial.occlusionTextureSet = material.occlusionTexture != nullptr ? material.texCoordSets.occlusion : -1;
+			shaderMaterial.emissiveTextureSet = material.emissiveTexture != nullptr ? material.texCoordSets.emissive : -1;
+			shaderMaterial.alphaMask = static_cast<float>(material.alphaMode == vkglTF::Material::ALPHAMODE_MASK);
+			shaderMaterial.alphaMaskCutoff = material.alphaCutoff;
+			shaderMaterial.emissiveStrength = material.emissiveStrength;
+
+			// TODO: glTF specs states that metallic roughness should be preferred, even if specular glosiness is present
+
+			if (material.pbrWorkflows.metallicRoughness) {
+				// Metallic roughness workflow
+				shaderMaterial.workflow = static_cast<float>(PBR_WORKFLOW_METALLIC_ROUGHNESS);
+				shaderMaterial.baseColorFactor = material.baseColorFactor;
+				shaderMaterial.metallicFactor = material.metallicFactor;
+				shaderMaterial.roughnessFactor = material.roughnessFactor;
+				shaderMaterial.PhysicalDescriptorTextureSet = material.metallicRoughnessTexture != nullptr ? material.texCoordSets.metallicRoughness : -1;
+				shaderMaterial.colorTextureSet = material.baseColorTexture != nullptr ? material.texCoordSets.baseColor : -1;
+			}
+
+			if (material.pbrWorkflows.specularGlossiness) {
+				// Specular glossiness workflow
+				shaderMaterial.workflow = static_cast<float>(PBR_WORKFLOW_SPECULAR_GLOSINESS);
+				shaderMaterial.PhysicalDescriptorTextureSet = material.extension.specularGlossinessTexture != nullptr ? material.texCoordSets.specularGlossiness : -1;
+				shaderMaterial.colorTextureSet = material.extension.diffuseTexture != nullptr ? material.texCoordSets.baseColor : -1;
+				shaderMaterial.diffuseFactor = material.extension.diffuseFactor;
+				shaderMaterial.specularFactor = glm::vec4(material.extension.specularFactor, 1.0f);
+			}
+
+			shaderMaterials.push_back(shaderMaterial);
+		}
+
+		if (shaderMaterialBuffer.buffer != VK_NULL_HANDLE) {
+			shaderMaterialBuffer.destroy();
+		}
+		VkDeviceSize bufferSize = shaderMaterials.size() * sizeof(ShaderMaterial);
+		Buffer stagingBuffer;
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, bufferSize, &stagingBuffer.buffer, &stagingBuffer.memory, shaderMaterials.data()));
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, bufferSize, &shaderMaterialBuffer.buffer, &shaderMaterialBuffer.memory));
+
+		// Copy from staging buffers
+		VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+		VkBufferCopy copyRegion{};
+		copyRegion.size = bufferSize;
+		vkCmdCopyBuffer(copyCmd, stagingBuffer.buffer, shaderMaterialBuffer.buffer, 1, &copyRegion);
+		vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
+		stagingBuffer.device = device;
+		stagingBuffer.destroy();
+
+		// Update descriptor
+		shaderMaterialBuffer.descriptor.buffer = shaderMaterialBuffer.buffer;
+		shaderMaterialBuffer.descriptor.offset = 0;
+		shaderMaterialBuffer.descriptor.range = bufferSize;
+		shaderMaterialBuffer.device = device;
+	}
+
+	void createMaterialBufferUSDZ()
+	{
+		std::vector<ShaderMaterial> shaderMaterials{};
+		for (auto& material : models.usdz_scene.materials) {
 			ShaderMaterial shaderMaterial{};
 
 			shaderMaterial.emissiveFactor = material.emissiveFactor;
@@ -510,6 +715,30 @@ public:
 		}
 	}
 
+	void setupNodeDescriptorSetUSDZ(vkUSDZ::Node *node) {
+		if (node->mesh) {
+			VkDescriptorSetAllocateInfo descriptorSetAllocInfo{};
+			descriptorSetAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+			descriptorSetAllocInfo.descriptorPool = descriptorPool;
+			descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayouts.node;
+			descriptorSetAllocInfo.descriptorSetCount = 1;
+			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &node->mesh->uniformBuffer.descriptorSet));
+
+			VkWriteDescriptorSet writeDescriptorSet{};
+			writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			writeDescriptorSet.descriptorCount = 1;
+			writeDescriptorSet.dstSet = node->mesh->uniformBuffer.descriptorSet;
+			writeDescriptorSet.dstBinding = 0;
+			writeDescriptorSet.pBufferInfo = &node->mesh->uniformBuffer.descriptor;
+
+			vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+		}
+		for (auto& child : node->children) {
+			setupNodeDescriptorSetUSDZ(child);
+		}
+	}
+
 	void setupDescriptors()
 	{
 		/*
@@ -524,6 +753,19 @@ public:
 
 		std::vector<vkglTF::Model*> modellist = { &models.skybox, &models.scene };
 		for (auto &model : modellist) {
+			for (auto &material : model->materials) {
+				imageSamplerCount += 5;
+				materialCount++;
+			}
+			for (auto node : model->linearNodes) {
+				if (node->mesh) {
+					meshCount++;
+				}
+			}
+		}
+
+		std::vector<vkUSDZ::Model*> usdz_modellist = { &models.usdz_scene };
+		for (auto &model : usdz_modellist) {
 			for (auto &material : model->materials) {
 				imageSamplerCount += 5;
 				materialCount++;
@@ -632,8 +874,59 @@ public:
 			descriptorSetLayoutCI.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
 			VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCI, nullptr, &descriptorSetLayouts.material));
 
+			// TODO: either glTF materials or USDZ materials
+
 			// Per-Material descriptor sets
 			for (auto &material : models.scene.materials) {
+				VkDescriptorSetAllocateInfo descriptorSetAllocInfo{};
+				descriptorSetAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+				descriptorSetAllocInfo.descriptorPool = descriptorPool;
+				descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayouts.material;
+				descriptorSetAllocInfo.descriptorSetCount = 1;
+				VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &material.descriptorSet));
+
+				std::vector<VkDescriptorImageInfo> imageDescriptors = {
+					textures.empty.descriptor,
+					textures.empty.descriptor,
+					material.normalTexture ? material.normalTexture->descriptor : textures.empty.descriptor,
+					material.occlusionTexture ? material.occlusionTexture->descriptor : textures.empty.descriptor,
+					material.emissiveTexture ? material.emissiveTexture->descriptor : textures.empty.descriptor
+				};
+
+				// TODO: glTF specs states that metallic roughness should be preferred, even if specular glosiness is present
+
+				if (material.pbrWorkflows.metallicRoughness) {
+					if (material.baseColorTexture) {
+						imageDescriptors[0] = material.baseColorTexture->descriptor;
+					}
+					if (material.metallicRoughnessTexture) {
+						imageDescriptors[1] = material.metallicRoughnessTexture->descriptor;
+					}
+				}
+
+				if (material.pbrWorkflows.specularGlossiness) {
+					if (material.extension.diffuseTexture) {
+						imageDescriptors[0] = material.extension.diffuseTexture->descriptor;
+					}
+					if (material.extension.specularGlossinessTexture) {
+						imageDescriptors[1] = material.extension.specularGlossinessTexture->descriptor;
+					}
+				}
+
+				std::array<VkWriteDescriptorSet, 5> writeDescriptorSets{};
+				for (size_t i = 0; i < imageDescriptors.size(); i++) {
+					writeDescriptorSets[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+					writeDescriptorSets[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+					writeDescriptorSets[i].descriptorCount = 1;
+					writeDescriptorSets[i].dstSet = material.descriptorSet;
+					writeDescriptorSets[i].dstBinding = static_cast<uint32_t>(i);
+					writeDescriptorSets[i].pImageInfo = &imageDescriptors[i];
+				}
+
+				vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+			}
+
+			for (auto &material : models.usdz_scene.materials) {
 				VkDescriptorSetAllocateInfo descriptorSetAllocInfo{};
 				descriptorSetAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 				descriptorSetAllocInfo.descriptorPool = descriptorPool;
@@ -696,6 +989,28 @@ public:
 				// Per-Node descriptor set
 				for (auto &node : models.scene.nodes) {
 					setupNodeDescriptorSet(node);
+				}
+			}
+
+			// Model node (matrices)
+			{
+				std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+					{ 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, nullptr },
+				};
+				VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI{};
+				descriptorSetLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+				descriptorSetLayoutCI.pBindings = setLayoutBindings.data();
+				descriptorSetLayoutCI.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+				VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCI, nullptr, &descriptorSetLayouts.node));
+
+				// Per-Node descriptor set
+				for (auto &node : models.scene.nodes) {
+					setupNodeDescriptorSet(node);
+				}
+
+				// Per-Node descriptor set
+				for (auto &node : models.usdz_scene.nodes) {
+					setupNodeDescriptorSetUSDZ(node);
 				}
 			}
 
@@ -1741,16 +2056,25 @@ public:
 		updateUniformBuffers();
 	}
 
-	void updateUniformBuffers()
+	void updateUniformBuffers(bool use_usdz = false)
 	{
 		// Scene
 		shaderValuesScene.projection = camera.matrices.perspective;
 		shaderValuesScene.view = camera.matrices.view;
 		
 		// Center and scale model
-		float scale = (1.0f / std::max(models.scene.aabb[0][0], std::max(models.scene.aabb[1][1], models.scene.aabb[2][2]))) * 0.5f;
-		glm::vec3 translate = -glm::vec3(models.scene.aabb[3][0], models.scene.aabb[3][1], models.scene.aabb[3][2]);
-		translate += -0.5f * glm::vec3(models.scene.aabb[0][0], models.scene.aabb[1][1], models.scene.aabb[2][2]);
+		float scale;
+		glm::vec3 translate;
+		
+		if (use_usdz) {
+      scale = (1.0f / std::max(models.usdz_scene.aabb[0][0], std::max(models.usdz_scene.aabb[1][1], models.usdz_scene.aabb[2][2]))) * 0.5f;
+      translate = -glm::vec3(models.usdz_scene.aabb[3][0], models.usdz_scene.aabb[3][1], models.usdz_scene.aabb[3][2]);
+      translate += -0.5f * glm::vec3(models.usdz_scene.aabb[0][0], models.usdz_scene.aabb[1][1], models.usdz_scene.aabb[2][2]);
+		} else {
+      scale = (1.0f / std::max(models.scene.aabb[0][0], std::max(models.scene.aabb[1][1], models.scene.aabb[2][2]))) * 0.5f;
+      translate = -glm::vec3(models.scene.aabb[3][0], models.scene.aabb[3][1], models.scene.aabb[3][2]);
+      translate += -0.5f * glm::vec3(models.scene.aabb[0][0], models.scene.aabb[1][1], models.scene.aabb[2][2]);
+		}
 
 		shaderValuesScene.model = glm::mat4(1.0f);
 		shaderValuesScene.model[0][0] = scale;
