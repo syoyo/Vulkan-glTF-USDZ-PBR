@@ -4,7 +4,9 @@ set(SRC_DIR ../../src)
 set(BASE_DIR ../../base)
 set(EXTERNAL_DIR ../../external)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -DVK_USE_PLATFORM_ANDROID_KHR -DVK_NO_PROTOTYPES")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -DVK_USE_PLATFORM_ANDROID_KHR -DVK_NO_PROTOTYPES")
+
+add_subdirectory(${EXTERNAL_DIR}/tinyusdz tinyusdz)
 
 file(GLOB BASE_SRC "${SRC_DIR}/main.cpp" "${EXTERNAL_DIR}/imgui/*.cpp")
 
@@ -14,6 +16,8 @@ add_library(
 
     ${BASE_DIR}/VulkanAndroid.cpp
     ${BASE_DIR}/VulkanExampleBase.cpp
+    ${BASE_DIR}/VulkanglTFModel.cpp
+    ${BASE_DIR}/VulkanUSDZModel.cpp
     ${BASE_DIR}/VulkanTexture.hpp
     ${EXTERNAL_DIR}/imgui/imgui_draw.cpp
 )
@@ -27,11 +31,13 @@ include_directories(${EXTERNAL_DIR})
 include_directories(${EXTERNAL_DIR}/glm)
 include_directories(${EXTERNAL_DIR}/gli)
 include_directories(${EXTERNAL_DIR}/tinygltf)
+include_directories(${EXTERNAL_DIR}/tinyusdz/src)
 include_directories(${ANDROID_NDK}/sources/android/native_app_glue)
 
 target_link_libraries(
     native-lib
     native-app-glue
+    tinyusdz_static
     android
     log
 )

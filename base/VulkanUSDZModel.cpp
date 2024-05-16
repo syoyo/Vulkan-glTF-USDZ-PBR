@@ -498,13 +498,14 @@ namespace vkUSDZ
 			const void *bufferJoints = nullptr;
 			const float *bufferWeights = nullptr;
 
-			int posByteStride;
-			int normByteStride;
-			int uv0ByteStride;
-			int uv1ByteStride;
-			int jointByteStride;
-			int weightByteStride;
-			int jointComponentType;
+			// Stride = divided by sizeof(componentType)
+			int posStride{3};
+			int normStride{3};
+			int uv0Stride{2};
+			int uv1Stride{2};
+			int jointStride{0};
+			int weightStride{0};
+			int jointComponentType{0};
 
 			for (size_t i = 0; i < rmesh.points.size(); i++) {
 				posMin[0] = (std::min)(posMin[0], rmesh.points[i][0]);
@@ -520,24 +521,24 @@ namespace vkUSDZ
 
 			// Position attribute is required
 			assert(rmesh.points.size());
-			posByteStride = sizeof(float) * 3;
+			posStride = 3;
 
 			bufferPos = reinterpret_cast<const float *>(rmesh.points.data());
 
 			if (!rmesh.normals.empty() && rmesh.normals.is_vertex() && (rmesh.normals.vertex_count() == rmesh.points.size())) {
 				bufferNormals = reinterpret_cast<const float *>(rmesh.normals.buffer());
-				normByteStride = rmesh.normals.stride_bytes();
+				normStride = rmesh.normals.stride_bytes() / sizeof(float);
 
 			}
 
 			if (rmesh.texcoords.count(0) && !rmesh.texcoords.at(0).empty() && rmesh.texcoords.at(0).is_vertex() && (rmesh.texcoords.at(0).vertex_count() == rmesh.points.size())) {
 				bufferTexCoordSet0 = reinterpret_cast<const float *>(rmesh.texcoords.at(0).buffer());
-				uv0ByteStride = rmesh.texcoords.at(0).stride_bytes();
+				uv0Stride = rmesh.texcoords.at(0).stride_bytes() / sizeof(float);
 			}
 
 			if (rmesh.texcoords.count(1) && !rmesh.texcoords.at(1).empty() && rmesh.texcoords.at(1).is_vertex() && (rmesh.texcoords.at(1).vertex_count() == rmesh.points.size())) {
 				bufferTexCoordSet1 = reinterpret_cast<const float *>(rmesh.texcoords.at(1).buffer());
-				uv1ByteStride = rmesh.texcoords.at(1).stride_bytes();
+				uv1Stride = rmesh.texcoords.at(1).stride_bytes() / sizeof(float);
 			}
 
 
@@ -564,10 +565,14 @@ namespace vkUSDZ
 
 			for (size_t v = 0; v < rmesh.points.size(); v++) {
 				Vertex vert{};
-				vert.pos = glm::vec4(glm::make_vec3(&bufferPos[v * posByteStride]), 1.0f);
-				vert.normal = glm::normalize(glm::vec3(bufferNormals ? glm::make_vec3(&bufferNormals[v * normByteStride]) : glm::vec3(0.0f)));
-				vert.uv0 = bufferTexCoordSet0 ? glm::make_vec2(&bufferTexCoordSet0[v * uv0ByteStride]) : glm::vec3(0.0f);
-				vert.uv1 = bufferTexCoordSet1 ? glm::make_vec2(&bufferTexCoordSet1[v * uv1ByteStride]) : glm::vec3(0.0f);
+				vert.pos = glm::vec4(glm::make_vec3(&bufferPos[v * posStride]), 1.0f);
+				vert.normal = glm::normalize(glm::vec3(bufferNormals ? glm::make_vec3(&bufferNormals[v * normStride]) : glm::vec3(0.0f)));
+				vert.uv0 = bufferTexCoordSet0 ? glm::make_vec2(&bufferTexCoordSet0[v * uv0Stride]) : glm::vec3(0.0f);
+				vert.uv1 = bufferTexCoordSet1 ? glm::make_vec2(&bufferTexCoordSet1[v * uv1Stride]) : glm::vec3(0.0f);
+
+				// FIXME: Investigate why we need to flip texcoord Y(due to handness?)
+				vert.uv0[1] = -vert.uv0[1];
+				vert.uv1[1] = -vert.uv1[1];
 
 #if 0
 				if (hasSkin)
@@ -763,6 +768,7 @@ namespace vkUSDZ
 				material.baseColorFactor.b = rmat.surfaceShader.diffuseColor.value[2];
 			}
 
+#if 0 // TODO
 			if (rmat.surfaceShader.emissiveColor.is_texture()) {
 				material.emissiveTexture = &textures[size_t(rmat.surfaceShader.emissiveColor.texture_id)];
 				material.texCoordSets.emissive = 0;
@@ -795,6 +801,7 @@ namespace vkUSDZ
 			} else {
 				material.alphaCutoff = static_cast<float>(rmat.surfaceShader.opacityThreshold.value);
 			}
+#endif
 
 
 #if 0 // TODO
@@ -990,6 +997,10 @@ namespace vkUSDZ
 			// You can explicitly enable triangulation and vertex-indices build by
 			//env.mesh_config.triangulate = true;
 			//env.mesh_config.build_vertex_indices = true;
+
+			// Load textures as stored representaion(e.g. 8bit sRGB texture is read as 8bit sRGB)
+			env.material_config.linearize_color_space = false;
+			env.material_config.preserve_texel_bitdepth = true;
 
 			std::string usd_basedir = tinyusdz::io::GetBaseDir(filename);
 

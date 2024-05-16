@@ -163,7 +163,7 @@ public:
 
 	VulkanExample() : VulkanExampleBase()
 	{
-		title = "Vulkan glTF 2.0 PBR - (C) Sascha Willems (www.saschawillems.de)";
+		title = "Vulkan glTF 2.0 + USDZ PBR - (C) Sascha Willems (www.saschawillems.de)";
 #if defined(TINYGLTF_ENABLE_DRACO)
 		std::cout << "Draco mesh compression is enabled" << std::endl;
 #endif
@@ -464,7 +464,10 @@ public:
 
 		std::string sceneFile;
 		if (use_usdz) {
-			sceneFile = assetpath + "models/DamagedHelmet/USDZ/DamagedHelmet.usdz";
+			//sceneFile = assetpath + "models/DamagedHelmet/USDZ/DamagedHelmet.usdz";
+			//sceneFile = assetpath + "models/simple-cube.usdz";
+		  sceneFile = assetpath + "models/sneaker_airforce.usdz";
+			//sceneFile = assetpath + "models/texture-quad.usdz";
 		} else {
 			sceneFile = assetpath + "models/DamagedHelmet/glTF-Embedded/DamagedHelmet.gltf";
 		}
@@ -1882,7 +1885,7 @@ public:
 
 		ImGui::SetNextWindowPos(ImVec2(10, 10));
 		ImGui::SetNextWindowSize(ImVec2(200 * scale, (models.scene.animations.size() > 0 ? 440 : 360) * scale), ImGuiSetCond_Always);
-		ImGui::Begin("Vulkan glTF 2.0 PBR", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+		ImGui::Begin("Vulkan glTF 2.0 + USDZ PBR", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
 		ImGui::PushItemWidth(100.0f * scale);
 
 		ui->text("www.saschawillems.de");

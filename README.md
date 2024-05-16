@@ -44,19 +44,20 @@ Model loading is implemented in the [vkUSDZ::Model](./base/VulkanUSDZModel.hpp) 
 The following USD features are currently supported by the [vkUSDZ::Model](./base/VulkanUSDZModel.hpp) class:
 
 * [x] Loading USDA, USDC and USDZ models
-    * [x] Xform and Scope Prim hierarchy
+    * [ ] Xform and Scope Prim hierarchy
     * [x] GeomMesh(polygon only)
       * [ ] per-face material using GeomSubset
-    * [x] Skinning(UsdSkel)
+    * [ ] Skinning(UsdSkel)
     * [ ] BlendShapes(UsdSkel)
-      * [x] SkelRoot and Skeleton Prim
-    * [x] PBR material support
-        * [x] Metallic-Roughness workflow
-        * [x] Specular-Glossiness workflow (useSpecularWorkflow)
-    * [x] Animations   
-        * [x] Articulated (translate, rotate, scale) SkelAnimation
+      * [ ] SkelRoot and Skeleton Prim
+    * [ ] PBR material support
+        * [x] baseColor texture 
+        * [ ] Metallic-Roughness workflow
+        * [ ] Specular-Glossiness workflow (useSpecularWorkflow)
+    * [ ] Animations   
+        * [ ] Articulated (translate, rotate, scale) SkelAnimation
         * [ ] BlendShape weights
-    * [x] Support for Draco mesh compression ([see instructions](#how-to-enable-draco-mesh-compression))
+
 
 Note that the model loader does not fully implement all aspects of the USD features, and as such there is no guarantee that all USDZ models work properly.
 
