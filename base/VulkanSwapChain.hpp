@@ -3,7 +3,7 @@
 * 
 * A swap chain is a collection of framebuffers used for rendering and presentation to the windowing system
 *
-* Copyright (C) 2016-2017 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2024 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -193,46 +193,29 @@ public:
 		std::vector<VkSurfaceFormatKHR> surfaceFormats(formatCount);
 		VK_CHECK_RESULT(fpGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount, surfaceFormats.data()));
 
-		// If the surface format list only includes one entry with VK_FORMAT_UNDEFINED,
-		// there is no preferered format, so we assume VK_FORMAT_B8G8R8A8_UNORM
-		if ((formatCount == 1) && (surfaceFormats[0].format == VK_FORMAT_UNDEFINED))
-		{
-			colorFormat = VK_FORMAT_B8G8R8A8_UNORM;
-			colorSpace = surfaceFormats[0].colorSpace;
-		}
-		else
-		{
-			// iterate over the list of available surface format and
-			// check for the presence of VK_FORMAT_B8G8R8A8_UNORM
-			bool found_B8G8R8A8_UNORM = false;
-			for (auto&& surfaceFormat : surfaceFormats)
-			{
-				// Prefer SRGB
-				if (surfaceFormat.format == VK_FORMAT_B8G8R8A8_SRGB)
-				{
-					colorFormat = surfaceFormat.format;
-					colorSpace = surfaceFormat.colorSpace;
-					found_B8G8R8A8_UNORM = true;
-					break;
-				}
-				//if (surfaceFormat.format == VK_FORMAT_B8G8R8A8_UNORM)
-				//{
-				//	colorFormat = surfaceFormat.format;
-				//	colorSpace = surfaceFormat.colorSpace;
-				//	found_B8G8R8A8_UNORM = true;
-				//	break;
-				//}
-			}
+        // We want to get a format that best suits our needs, so we try to get one from a set of preferred formats
+        // Initialize the format to the first one returned by the implementation in case we can't find one of the preferred formats
+        VkSurfaceFormatKHR selectedFormat = surfaceFormats[0];
+#ifdef HDR
+        std::vector<VkFormat> preferredImageFormats = {
+                VK_FORMAT_A2B10G10R10_UNORM_PACK32,
+        };
+#else
+        std::vector<VkFormat> preferredImageFormats = {
+                VK_FORMAT_B8G8R8A8_SRGB,
+                VK_FORMAT_R8G8B8A8_SRGB,
+                VK_FORMAT_A8B8G8R8_SRGB_PACK32,
+        };
+#endif
+        for (auto& availableFormat : surfaceFormats) {
+            if (std::find(preferredImageFormats.begin(), preferredImageFormats.end(), availableFormat.format) != preferredImageFormats.end()) {
+                selectedFormat = availableFormat;
+                break;
+            }
+        }
 
-			// in case VK_FORMAT_B8G8R8A8_UNORM is not available
-			// select the first available color format
-			if (!found_B8G8R8A8_UNORM)
-			{
-				colorFormat = surfaceFormats[0].format;
-				colorSpace = surfaceFormats[0].colorSpace;
-			}
-		}
-
+        colorFormat = selectedFormat.format;
+        colorSpace = selectedFormat.colorSpace;
 	}
 
 	/**

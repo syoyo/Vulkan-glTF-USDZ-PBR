@@ -1,7 +1,7 @@
 /*
 * Vulkan Example base class
 *
-* Copyright (C) 2016 by Sascha Willems - www.saschawillems.de
+* Copyright (C) 2016-2024 by Sascha Willems - www.saschawillems.de
 *
 * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
 */
@@ -93,7 +93,7 @@ protected:
 	VkCommandPool cmdPool;
 	VkRenderPass renderPass;
 	std::vector<VkFramebuffer>frameBuffers;
-	uint32_t currentBuffer = 0;
+	uint32_t imageIndex = 0;
 	VkDescriptorPool descriptorPool;
 	VkPipelineCache pipelineCache;
 	VulkanSwapChain swapChain;
@@ -115,8 +115,14 @@ public:
 		bool validation = false;
 		bool fullscreen = false;
 		bool vsync = false;
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+		// MSAA is costly on Android and barely visible due to high resolution displays, so disable b default
+		bool multiSampling = false;
+		VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_1_BIT;
+#else
 		bool multiSampling = true;
 		VkSampleCountFlagBits sampleCount = VK_SAMPLE_COUNT_4_BIT;
+#endif
 	} settings;
 	
 	struct DepthStencil {
@@ -247,6 +253,7 @@ public:
 	virtual void windowResized();
 	virtual void setupFrameBuffer();
 	virtual void prepare();
+	virtual void fileDropped(std::string filename);
 
 	void initSwapchain();
 	void setupSwapChain();

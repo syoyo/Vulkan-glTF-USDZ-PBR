@@ -10,9 +10,9 @@ Physically-Based Rendering example implementation with image based lighting in V
 
 ## glTF 2.0 Model loading
 
-Model loading is implemented in the [vkglTF::Model](./base/VulkanglTFModel.hpp) class, using [tiny glTF library](https://github.com/syoyo/tinygltf) to import the glTF 2.0 files, so e.g. all file formats supported by tinyglTF are suported. This class converts the glTF structures into Vulkan compatible structures used for setup and rendering.
+Model loading is implemented in the [vkglTF::Model](./base/VulkanglTFModel.h) class, using [tiny glTF library](https://github.com/syoyo/tinygltf) to import the glTF 2.0 files, so e.g. all file formats supported by tinyglTF are suported. This class converts the glTF structures into Vulkan compatible structures used for setup and rendering.
 
-The following major glTF 2.0 features are currently supported by the [vkglTF::Model](./base/VulkanglTFModel.hpp) class:
+The following major glTF 2.0 features are currently supported by the [vkglTF::Model](./base/VulkanglTFModel.h) class:
 
 * [x] Loading arbitrary glTF 2.0 models
     * [x] Full node hierarchy
@@ -26,6 +26,12 @@ The following major glTF 2.0 features are currently supported by the [vkglTF::Mo
     * [x] Support for Draco mesh compression ([see instructions](#how-to-enable-draco-mesh-compression))
 
 Note that the model loader does not fully implement all aspects of the glTF 2.0 standard, and as such there is no guarantee that all glTF 2.0 models work properly.
+
+Supported extensions:
+
+* KHR_materials_pbrSpecularGlossiness
+* KHR_materials_unlit
+* KHR_materials_emissive_strength
 
 ## Loading different scenes
 
@@ -72,7 +78,7 @@ The physical based render model uses multiple source images for the lighting equ
 
 This pass generates a 2D BRDF lookup table based on the formulas used in the pbr implementation. The lookup table contains BRDF values for roughness and view angle and is stored as a 16-bit per component floating point texture to provide proper precision.
 
-See ```VulkanExample::generateBRDFLUT()```
+See ```VulkanApplication::generateBRDFLUT()```
 
 ### Irradiance cube map
 
@@ -82,7 +88,7 @@ See ```VulkanExample::generateBRDFLUT()```
 
 Generates a small (64 x 64 px) irradiance cube map from that stores the light radiated from the surrounding environment. This is sampled for the **indirect diffuse** part of the lighting equation.
 
-See ```VulkanExample::generateCubemaps()``` with target ```IRRADIANCE```
+See ```VulkanApplication::generateCubemaps()``` with target ```IRRADIANCE```
 
 ### Pre-filtered (mip-mapped radiance) environment cube map
 
@@ -98,7 +104,7 @@ Complete mip chain from *left* roughness = 0.0 to *right* roughness = 1.0:
 
 (*note:* down/up sized to same size for visualization)
 
-See ```VulkanExample::generateCubemaps()``` with target ```PREFILTEREDENV```
+See ```VulkanApplication::generateCubemaps()``` with target ```PREFILTEREDENV```
 
 ## Cloning
 This repository contains submodules for some of the external dependencies, so when doing a fresh clone you need to clone recursively:
@@ -135,15 +141,20 @@ make
 
 ### Android 
 
+<img src="./screenshots/damagedhelmet_android.jpg" width="644px">
+
 #### Prerequisites
 
-- [Android Studio 3.0](https://developer.android.com/studio/index.html) or higher
+- [Android Studio Jellyfish(2023.3.1)](https://developer.android.com/studio/index.html) or higher
 - Android [NDK](https://developer.android.com/ndk/downloads/index.html)
 
 #### Building
+
 - In Android Studio, select ```Import project```
 - Select the ```android``` sub folder of the repository
 - Once import has finished the project can be build, run and debugged from Android Studio
+
+NOTE: Android SDK API version is set to 33 (Android 13).
 
 ## How to enable Draco mesh compression
 In order to enable support for loading Draco compressed glTF files you need to:

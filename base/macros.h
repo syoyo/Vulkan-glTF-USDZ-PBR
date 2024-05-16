@@ -14,6 +14,7 @@
 #include "VulkanAndroid.h"
 #endif
 
+
 #if defined(__ANDROID__)
 #define VK_CHECK_RESULT(f)																				\
 {																										\

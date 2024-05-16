@@ -1,10 +1,10 @@
 /*
-* Vulkan physical based rendering glTF 2.0 demo
-*
-* Copyright (C) 2018 by Sascha Willems - www.saschawillems.de
-*
-* This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
-*/
+ * Vulkan physical based rendering glTF 2.0 renderer
+ *
+ * Copyright (C) 2018-2024 by Sascha Willems - www.saschawillems.de
+ *
+ * This code is licensed under the MIT license (MIT) (http://opensource.org/licenses/MIT)
+ */
 
 // glTF format: https://github.com/KhronosGroup/glTF
 // tinyglTF loader: https://github.com/syoyo/tinygltf
@@ -16,17 +16,13 @@
 #include <vector>
 #include <chrono>
 #include <map>
+#include <unordered_map>
 #include "algorithm"
-
-#if defined(__ANDROID__)
-#define TINYGLTF_ANDROID_LOAD_FROM_ASSETS
-#endif
 
 #include <vulkan/vulkan.h>
 #include "VulkanExampleBase.h"
 #include "VulkanTexture.hpp"
 #include "VulkanglTFModel.h"
-#include "VulkanUSDZModel.h"
 #include "VulkanUtils.hpp"
 #include "ui.hpp"
 
@@ -38,7 +34,7 @@
 /*
 	PBR example main class
 */
-class VulkanExample : public VulkanExampleBase
+class VulkanApplication : public VulkanExampleBase
 {
 public:
 	struct Textures {
@@ -50,8 +46,7 @@ public:
 	} textures;
 
 	struct Models {
-		vkUSDZ::Model scene;
-		vkglTF::Model gltf_scene;
+		vkglTF::Model scene;
 		vkglTF::Model skybox;
 	} models;
 
@@ -80,16 +75,14 @@ public:
 
 	VkPipelineLayout pipelineLayout;
 
-	struct Pipelines {
-		VkPipeline skybox;
-		VkPipeline pbr;
-		VkPipeline pbrAlphaBlend;
-	} pipelines;
+	std::unordered_map<std::string, VkPipeline> pipelines;
+	VkPipeline boundPipeline = VK_NULL_HANDLE;
 
 	struct DescriptorSetLayouts {
 		VkDescriptorSetLayout scene;
 		VkDescriptorSetLayout material;
 		VkDescriptorSetLayout node;
+		VkDescriptorSetLayout materialBuffer;
 	} descriptorSetLayouts;
 
 	struct DescriptorSets {
@@ -97,7 +90,7 @@ public:
 		VkDescriptorSet skybox;
 	};
 	std::vector<DescriptorSets> descriptorSets;
-
+	
 	std::vector<VkCommandBuffer> commandBuffers;
 	std::vector<UniformBufferSet> uniformBuffers;
 
@@ -106,14 +99,14 @@ public:
 	std::vector<VkSemaphore> presentCompleteSemaphores;
 
 	const uint32_t renderAhead = 2;
-	uint32_t frameIndex = 0;
+	uint32_t currentFrame = 0;
 
 	int32_t animationIndex = 0;
 	float animationTimer = 0.0f;
 	bool animate = true;
 
 	bool displayBackground = true;
-
+	
 	struct LightSource {
 		glm::vec3 color = glm::vec3(1.0f);
 		glm::vec3 rotation = glm::vec3(75.0f, 40.0f, 0.0f);
@@ -133,7 +126,8 @@ public:
 
 	enum PBRWorkflows{ PBR_WORKFLOW_METALLIC_ROUGHNESS = 0, PBR_WORKFLOW_SPECULAR_GLOSINESS = 1 };
 
-	struct PushConstBlockMaterial {
+	// We use a material buffer to pass material data ind image indices to the shader
+	struct alignas(16) ShaderMaterial {
 		glm::vec4 baseColorFactor;
 		glm::vec4 emissiveFactor;
 		glm::vec4 diffuseFactor;
@@ -148,7 +142,10 @@ public:
 		float roughnessFactor;
 		float alphaMask;
 		float alphaMaskCutoff;
-	} pushConstBlockMaterial;
+		float emissiveStrength;
+	};
+	Buffer shaderMaterialBuffer;
+	VkDescriptorSet descriptorSetMaterials;
 
 	std::map<std::string, std::string> environments;
 	std::string selectedEnvironment = "papermill";
@@ -161,19 +158,19 @@ public:
 	int32_t debugViewInputs = 0;
 	int32_t debugViewEquation = 0;
 
-	VulkanExample() : VulkanExampleBase()
+	VulkanApplication() : VulkanExampleBase()
 	{
-		title = "Vulkan glTF 2.0 + USDZ PBR - (C) Sascha Willems (www.saschawillems.de)";
+		title = "Vulkan glTF 2.0 PBR - (C) Sascha Willems (www.saschawillems.de)";
 #if defined(TINYGLTF_ENABLE_DRACO)
 		std::cout << "Draco mesh compression is enabled" << std::endl;
 #endif
 	}
 
-	~VulkanExample()
+	~VulkanApplication()
 	{
-		vkDestroyPipeline(device, pipelines.skybox, nullptr);
-		vkDestroyPipeline(device, pipelines.pbr, nullptr);
-		vkDestroyPipeline(device, pipelines.pbrAlphaBlend, nullptr);
+		for (auto& pipeline : pipelines) {
+			vkDestroyPipeline(device, pipeline.second, nullptr);
+		}
 
 		vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.scene, nullptr);
@@ -207,53 +204,51 @@ public:
 		delete ui;
 	}
 
+	void resetCamera() {
+		camera.setPosition({ 0.0f, 0.0f, 1.0f });
+		camera.setRotation({ 0.0f, 0.0f, 0.0f });
+		camera.updateViewMatrix();
+	}
+
 	void renderNode(vkglTF::Node *node, uint32_t cbIndex, vkglTF::Material::AlphaMode alphaMode) {
 		if (node->mesh) {
 			// Render mesh primitives
 			for (vkglTF::Primitive * primitive : node->mesh->primitives) {
 				if (primitive->material.alphaMode == alphaMode) {
+					std::string pipelineName = "pbr";
+					std::string pipelineVariant = "";
+
+					if (primitive->material.unlit) {
+						// KHR_materials_unlit
+						pipelineName = "unlit";
+					};
+
+					// Material properties define if we e.g. need to bind a pipeline variant with culling disabled (double sided)
+					if (alphaMode == vkglTF::Material::ALPHAMODE_BLEND) {
+						pipelineVariant = "_alpha_blending";
+					} else {
+						if (primitive->material.doubleSided) {
+							pipelineVariant = "_double_sided";
+						}
+					}
+
+					const VkPipeline pipeline = pipelines[pipelineName + pipelineVariant];
+
+					if (pipeline != boundPipeline) {
+						vkCmdBindPipeline(commandBuffers[cbIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+						boundPipeline = pipeline;
+					}
 
 					const std::vector<VkDescriptorSet> descriptorsets = {
 						descriptorSets[cbIndex].scene,
 						primitive->material.descriptorSet,
 						node->mesh->uniformBuffer.descriptorSet,
+						descriptorSetMaterials
 					};
 					vkCmdBindDescriptorSets(commandBuffers[cbIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, static_cast<uint32_t>(descriptorsets.size()), descriptorsets.data(), 0, NULL);
 
-					// Pass material parameters as push constants
-					PushConstBlockMaterial pushConstBlockMaterial{};
-					pushConstBlockMaterial.emissiveFactor = primitive->material.emissiveFactor;
-					// To save push constant space, availabilty and texture coordiante set are combined
-					// -1 = texture not used for this material, >= 0 texture used and index of texture coordinate set
-					pushConstBlockMaterial.colorTextureSet = primitive->material.baseColorTexture != nullptr ? primitive->material.texCoordSets.baseColor : -1;
-					pushConstBlockMaterial.normalTextureSet = primitive->material.normalTexture != nullptr ? primitive->material.texCoordSets.normal : -1;
-					pushConstBlockMaterial.occlusionTextureSet = primitive->material.occlusionTexture != nullptr ? primitive->material.texCoordSets.occlusion : -1;
-					pushConstBlockMaterial.emissiveTextureSet = primitive->material.emissiveTexture != nullptr ? primitive->material.texCoordSets.emissive : -1;
-					pushConstBlockMaterial.alphaMask = static_cast<float>(primitive->material.alphaMode == vkglTF::Material::ALPHAMODE_MASK);
-					pushConstBlockMaterial.alphaMaskCutoff = primitive->material.alphaCutoff;
-
-					// TODO: glTF specs states that metallic roughness should be preferred, even if specular glosiness is present
-
-					if (primitive->material.pbrWorkflows.metallicRoughness) {
-						// Metallic roughness workflow
-						pushConstBlockMaterial.workflow = static_cast<float>(PBR_WORKFLOW_METALLIC_ROUGHNESS);
-						pushConstBlockMaterial.baseColorFactor = primitive->material.baseColorFactor;
-						pushConstBlockMaterial.metallicFactor = primitive->material.metallicFactor;
-						pushConstBlockMaterial.roughnessFactor = primitive->material.roughnessFactor;
-						pushConstBlockMaterial.PhysicalDescriptorTextureSet = primitive->material.metallicRoughnessTexture != nullptr ? primitive->material.texCoordSets.metallicRoughness : -1;
-						pushConstBlockMaterial.colorTextureSet = primitive->material.baseColorTexture != nullptr ? primitive->material.texCoordSets.baseColor : -1;
-					}
-
-					if (primitive->material.pbrWorkflows.specularGlossiness) {
-						// Specular glossiness workflow
-						pushConstBlockMaterial.workflow = static_cast<float>(PBR_WORKFLOW_SPECULAR_GLOSINESS);
-						pushConstBlockMaterial.PhysicalDescriptorTextureSet = primitive->material.extension.specularGlossinessTexture != nullptr ? primitive->material.texCoordSets.specularGlossiness : -1;
-						pushConstBlockMaterial.colorTextureSet = primitive->material.extension.diffuseTexture != nullptr ? primitive->material.texCoordSets.baseColor : -1;
-						pushConstBlockMaterial.diffuseFactor = primitive->material.extension.diffuseFactor;
-						pushConstBlockMaterial.specularFactor = glm::vec4(primitive->material.extension.specularFactor, 1.0f);
-					}
-
-					vkCmdPushConstants(commandBuffers[cbIndex], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstBlockMaterial), &pushConstBlockMaterial);
+					// Pass material index for this primitive using a push constant, the shader uses this to index into the material buffer
+					vkCmdPushConstants(commandBuffers[cbIndex], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(uint32_t), &primitive->material.index);
 
 					if (primitive->hasIndices) {
 						vkCmdDrawIndexed(commandBuffers[cbIndex], primitive->indexCount, 1, primitive->firstIndex, 0, 0);
@@ -269,70 +264,10 @@ public:
 		}
 	}
 
-	void renderNode(vkUSDZ::Node *node, uint32_t cbIndex, vkUSDZ::Material::AlphaMode alphaMode) {
-		if (node->mesh) {
-			// Render mesh primitives
-			for (vkUSDZ::Primitive * primitive : node->mesh->primitives) {
-				if (primitive->material.alphaMode == alphaMode) {
-
-					const std::vector<VkDescriptorSet> descriptorsets = {
-						descriptorSets[cbIndex].scene,
-						primitive->material.descriptorSet,
-						node->mesh->uniformBuffer.descriptorSet,
-					};
-					vkCmdBindDescriptorSets(commandBuffers[cbIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, static_cast<uint32_t>(descriptorsets.size()), descriptorsets.data(), 0, NULL);
-
-					// Pass material parameters as push constants
-					PushConstBlockMaterial pushConstBlockMaterial{};
-					pushConstBlockMaterial.emissiveFactor = primitive->material.emissiveFactor;
-					// To save push constant space, availabilty and texture coordiante set are combined
-					// -1 = texture not used for this material, >= 0 texture used and index of texture coordinate set
-					pushConstBlockMaterial.colorTextureSet = primitive->material.baseColorTexture != nullptr ? primitive->material.texCoordSets.baseColor : -1;
-					pushConstBlockMaterial.normalTextureSet = primitive->material.normalTexture != nullptr ? primitive->material.texCoordSets.normal : -1;
-					pushConstBlockMaterial.occlusionTextureSet = primitive->material.occlusionTexture != nullptr ? primitive->material.texCoordSets.occlusion : -1;
-					pushConstBlockMaterial.emissiveTextureSet = primitive->material.emissiveTexture != nullptr ? primitive->material.texCoordSets.emissive : -1;
-					pushConstBlockMaterial.alphaMask = static_cast<float>(primitive->material.alphaMode == vkUSDZ::Material::ALPHAMODE_MASK);
-					pushConstBlockMaterial.alphaMaskCutoff = primitive->material.alphaCutoff;
-
-					// TODO: glTF specs states that metallic roughness should be preferred, even if specular glosiness is present
-
-					if (primitive->material.pbrWorkflows.metallicRoughness) {
-						// Metallic roughness workflow
-						pushConstBlockMaterial.workflow = static_cast<float>(PBR_WORKFLOW_METALLIC_ROUGHNESS);
-						pushConstBlockMaterial.baseColorFactor = primitive->material.baseColorFactor;
-						pushConstBlockMaterial.metallicFactor = primitive->material.metallicFactor;
-						pushConstBlockMaterial.roughnessFactor = primitive->material.roughnessFactor;
-						pushConstBlockMaterial.PhysicalDescriptorTextureSet = primitive->material.metallicRoughnessTexture != nullptr ? primitive->material.texCoordSets.metallicRoughness : -1;
-						pushConstBlockMaterial.colorTextureSet = primitive->material.baseColorTexture != nullptr ? primitive->material.texCoordSets.baseColor : -1;
-					}
-
-					if (primitive->material.pbrWorkflows.specularGlossiness) {
-						// Specular glossiness workflow
-						pushConstBlockMaterial.workflow = static_cast<float>(PBR_WORKFLOW_SPECULAR_GLOSINESS);
-						pushConstBlockMaterial.PhysicalDescriptorTextureSet = primitive->material.extension.specularGlossinessTexture != nullptr ? primitive->material.texCoordSets.specularGlossiness : -1;
-						pushConstBlockMaterial.colorTextureSet = primitive->material.extension.diffuseTexture != nullptr ? primitive->material.texCoordSets.baseColor : -1;
-						pushConstBlockMaterial.diffuseFactor = primitive->material.extension.diffuseFactor;
-						pushConstBlockMaterial.specularFactor = glm::vec4(primitive->material.extension.specularFactor, 1.0f);
-					}
-
-					vkCmdPushConstants(commandBuffers[cbIndex], pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstBlockMaterial), &pushConstBlockMaterial);
-
-					if (primitive->hasIndices) {
-						vkCmdDrawIndexed(commandBuffers[cbIndex], primitive->indexCount, 1, primitive->firstIndex, 0, 0);
-					} else {
-						vkCmdDraw(commandBuffers[cbIndex], primitive->vertexCount, 1, 0, 0);
-					}
-				}
-			}
-
-		};
-		for (auto child : node->children) {
-			renderNode(child, cbIndex, alphaMode);
-		}
-	}
-
-	void recordCommandBuffers()
+	void recordCommandBuffer()
 	{
+		vkResetCommandBuffer(commandBuffers[currentFrame], 0);
+
 		VkCommandBufferBeginInfo cmdBufferBeginInfo{};
 		cmdBufferBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
@@ -356,79 +291,142 @@ public:
 		renderPassBeginInfo.renderArea.extent.height = height;
 		renderPassBeginInfo.clearValueCount = settings.multiSampling ? 3 : 2;
 		renderPassBeginInfo.pClearValues = clearValues;
+		renderPassBeginInfo.framebuffer = frameBuffers[imageIndex];
 
-		for (size_t i = 0; i < commandBuffers.size(); ++i) {
-			renderPassBeginInfo.framebuffer = frameBuffers[i];
+		VkCommandBuffer currentCB = commandBuffers[currentFrame];
 
-			VkCommandBuffer currentCB = commandBuffers[i];
+		VK_CHECK_RESULT(vkBeginCommandBuffer(currentCB, &cmdBufferBeginInfo));
+		vkCmdBeginRenderPass(currentCB, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-			VK_CHECK_RESULT(vkBeginCommandBuffer(currentCB, &cmdBufferBeginInfo));
-			vkCmdBeginRenderPass(currentCB, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+		VkViewport viewport{};
+		viewport.width = (float)width;
+		viewport.height = (float)height;
+		viewport.minDepth = 0.0f;
+		viewport.maxDepth = 1.0f;
+		vkCmdSetViewport(currentCB, 0, 1, &viewport);
 
-			VkViewport viewport{};
-			viewport.width = (float)width;
-			viewport.height = (float)height;
-			viewport.minDepth = 0.0f;
-			viewport.maxDepth = 1.0f;
-			vkCmdSetViewport(currentCB, 0, 1, &viewport);
+		VkRect2D scissor{};
+		scissor.extent = { width, height };
+		vkCmdSetScissor(currentCB, 0, 1, &scissor);
 
-			VkRect2D scissor{};
-			scissor.extent = { width, height };
-			vkCmdSetScissor(currentCB, 0, 1, &scissor);
+		VkDeviceSize offsets[1] = { 0 };
 
-			VkDeviceSize offsets[1] = { 0 };
-
-			if (displayBackground) {
-				vkCmdBindDescriptorSets(currentCB, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i].skybox, 0, nullptr);
-				vkCmdBindPipeline(currentCB, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.skybox);
-				models.skybox.draw(currentCB);
-			}
-
-			vkCmdBindPipeline(currentCB, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbr);
-
-			vkUSDZ::Model &model = models.scene;
-
-			vkCmdBindVertexBuffers(currentCB, 0, 1, &model.vertices.buffer, offsets);
-			if (model.indices.buffer != VK_NULL_HANDLE) {
-				vkCmdBindIndexBuffer(currentCB, model.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-			}
-
-			// Opaque primitives first
-			for (auto node : model.nodes) {
-				renderNode(node, i, vkUSDZ::Material::ALPHAMODE_OPAQUE);
-			}
-			// Alpha masked primitives
-			for (auto node : model.nodes) {
-				renderNode(node, i, vkUSDZ::Material::ALPHAMODE_MASK);
-			}
-			// Transparent primitives
-			// TODO: Correct depth sorting
-			vkCmdBindPipeline(currentCB, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines.pbrAlphaBlend);
-			for (auto node : model.nodes) {
-				renderNode(node, i, vkUSDZ::Material::ALPHAMODE_BLEND);
-			}
-
-			// User interface
-			ui->draw(currentCB);
-
-			vkCmdEndRenderPass(currentCB);
-			VK_CHECK_RESULT(vkEndCommandBuffer(currentCB));
+		if (displayBackground) {
+			vkCmdBindDescriptorSets(currentCB, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame].skybox, 0, nullptr);
+			vkCmdBindPipeline(currentCB, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines["skybox"]);
+			models.skybox.draw(currentCB);
 		}
+
+		vkglTF::Model &model = models.scene;
+
+		vkCmdBindVertexBuffers(currentCB, 0, 1, &model.vertices.buffer, offsets);
+		if (model.indices.buffer != VK_NULL_HANDLE) {
+			vkCmdBindIndexBuffer(currentCB, model.indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+		}
+
+		boundPipeline = VK_NULL_HANDLE;
+
+		// Opaque primitives first
+		for (auto node : model.nodes) {
+			renderNode(node, currentFrame, vkglTF::Material::ALPHAMODE_OPAQUE);
+		}
+		// Alpha masked primitives
+		for (auto node : model.nodes) {
+			renderNode(node, currentFrame, vkglTF::Material::ALPHAMODE_MASK);
+		}
+		// Transparent primitives
+		// TODO: Correct depth sorting
+		for (auto node : model.nodes) {
+			renderNode(node, currentFrame, vkglTF::Material::ALPHAMODE_BLEND);
+		}
+
+		// User interface
+		ui->draw(currentCB);
+
+		vkCmdEndRenderPass(currentCB);
+		VK_CHECK_RESULT(vkEndCommandBuffer(currentCB));
 	}
 
-	void loadScene(std::string filename, bool is_usdz = true)
+	// We place all materials for the current scene into a shader storage buffer stored on the GPU
+	// This allows use to use arbitrary large material defintions
+	// The fragment shader then get's the index into this material array from a push constant set per primitive
+	void createMaterialBuffer()
+	{
+		std::vector<ShaderMaterial> shaderMaterials{};
+		for (auto& material : models.scene.materials) {
+			ShaderMaterial shaderMaterial{};
+
+			shaderMaterial.emissiveFactor = material.emissiveFactor;
+			// To save space, availabilty and texture coordinate set are combined
+			// -1 = texture not used for this material, >= 0 texture used and index of texture coordinate set
+			shaderMaterial.colorTextureSet = material.baseColorTexture != nullptr ? material.texCoordSets.baseColor : -1;
+			shaderMaterial.normalTextureSet = material.normalTexture != nullptr ? material.texCoordSets.normal : -1;
+			shaderMaterial.occlusionTextureSet = material.occlusionTexture != nullptr ? material.texCoordSets.occlusion : -1;
+			shaderMaterial.emissiveTextureSet = material.emissiveTexture != nullptr ? material.texCoordSets.emissive : -1;
+			shaderMaterial.alphaMask = static_cast<float>(material.alphaMode == vkglTF::Material::ALPHAMODE_MASK);
+			shaderMaterial.alphaMaskCutoff = material.alphaCutoff;
+			shaderMaterial.emissiveStrength = material.emissiveStrength;
+
+			// TODO: glTF specs states that metallic roughness should be preferred, even if specular glosiness is present
+
+			if (material.pbrWorkflows.metallicRoughness) {
+				// Metallic roughness workflow
+				shaderMaterial.workflow = static_cast<float>(PBR_WORKFLOW_METALLIC_ROUGHNESS);
+				shaderMaterial.baseColorFactor = material.baseColorFactor;
+				shaderMaterial.metallicFactor = material.metallicFactor;
+				shaderMaterial.roughnessFactor = material.roughnessFactor;
+				shaderMaterial.PhysicalDescriptorTextureSet = material.metallicRoughnessTexture != nullptr ? material.texCoordSets.metallicRoughness : -1;
+				shaderMaterial.colorTextureSet = material.baseColorTexture != nullptr ? material.texCoordSets.baseColor : -1;
+			}
+
+			if (material.pbrWorkflows.specularGlossiness) {
+				// Specular glossiness workflow
+				shaderMaterial.workflow = static_cast<float>(PBR_WORKFLOW_SPECULAR_GLOSINESS);
+				shaderMaterial.PhysicalDescriptorTextureSet = material.extension.specularGlossinessTexture != nullptr ? material.texCoordSets.specularGlossiness : -1;
+				shaderMaterial.colorTextureSet = material.extension.diffuseTexture != nullptr ? material.texCoordSets.baseColor : -1;
+				shaderMaterial.diffuseFactor = material.extension.diffuseFactor;
+				shaderMaterial.specularFactor = glm::vec4(material.extension.specularFactor, 1.0f);
+			}
+
+			shaderMaterials.push_back(shaderMaterial);
+		}
+
+		if (shaderMaterialBuffer.buffer != VK_NULL_HANDLE) {
+			shaderMaterialBuffer.destroy();
+		}
+		VkDeviceSize bufferSize = shaderMaterials.size() * sizeof(ShaderMaterial);
+		Buffer stagingBuffer;
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, bufferSize, &stagingBuffer.buffer, &stagingBuffer.memory, shaderMaterials.data()));
+		VK_CHECK_RESULT(vulkanDevice->createBuffer(VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, bufferSize, &shaderMaterialBuffer.buffer, &shaderMaterialBuffer.memory));
+
+		// Copy from staging buffers
+		VkCommandBuffer copyCmd = vulkanDevice->createCommandBuffer(VK_COMMAND_BUFFER_LEVEL_PRIMARY, true);
+		VkBufferCopy copyRegion{};
+		copyRegion.size = bufferSize;
+		vkCmdCopyBuffer(copyCmd, stagingBuffer.buffer, shaderMaterialBuffer.buffer, 1, &copyRegion);
+		vulkanDevice->flushCommandBuffer(copyCmd, queue, true);
+		stagingBuffer.device = device;
+		stagingBuffer.destroy();
+
+		// Update descriptor
+		shaderMaterialBuffer.descriptor.buffer = shaderMaterialBuffer.buffer;
+		shaderMaterialBuffer.descriptor.offset = 0;
+		shaderMaterialBuffer.descriptor.range = bufferSize;
+		shaderMaterialBuffer.device = device;
+	}
+
+	void loadScene(std::string filename)
 	{
 		std::cout << "Loading scene from " << filename << std::endl;
 		models.scene.destroy(device);
 		animationIndex = 0;
 		animationTimer = 0.0f;
-		if (is_usdz) {
-			models.scene.loadFromFile(filename, vulkanDevice, queue);
-		} else {
-			models.gltf_scene.loadFromFile(filename, vulkanDevice, queue);
-		}
-		camera.setPosition({ 0.0f, 0.0f, 1.0f });
-		camera.setRotation({ 0.0f, 0.0f, 0.0f });
+		auto tStart = std::chrono::high_resolution_clock::now();
+		models.scene.loadFromFile(filename, vulkanDevice, queue);
+		createMaterialBuffer();
+		auto tFileLoad = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - tStart).count();
+		std::cout << "Loading took " << tFileLoad << " ms" << std::endl;
+		resetCamera();
 	}
 
 	void loadEnvironment(std::string filename)
@@ -443,14 +441,12 @@ public:
 		generateCubemaps();
 	}
 
-	void loadAssets(bool use_usdz = true)
+	void loadAssets()
 	{
-		std::string ext = use_usdz ? ".usdz" : ".gltf";
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
 		tinygltf::asset_manager = androidApp->activity->assetManager;
-		readDirectory(assetpath + "models", "*" + ext, scenes, true);
+		readDirectory(assetpath + "models", "gltf", scenes, true);
 #else
-		const std::string assetpath = "./../data/";
 		struct stat info;
 		if (stat(assetpath.c_str(), &info) != 0) {
 			std::string msg = "Could not locate asset path in \"" + assetpath + "\".\nMake sure binary is run from correct relative directory!";
@@ -458,22 +454,14 @@ public:
 			exit(-1);
 		}
 #endif
-		readDirectory(assetpath + "environments", "*.ktx", environments, false);
+		readDirectory(assetpath + "environments", "ktx", environments, false);
 
 		textures.empty.loadFromFile(assetpath + "textures/empty.ktx", VK_FORMAT_R8G8B8A8_UNORM, vulkanDevice, queue);
 
-		std::string sceneFile;
-		if (use_usdz) {
-			//sceneFile = assetpath + "models/DamagedHelmet/USDZ/DamagedHelmet.usdz";
-			//sceneFile = assetpath + "models/simple-cube.usdz";
-		  sceneFile = assetpath + "models/sneaker_airforce.usdz";
-			//sceneFile = assetpath + "models/texture-quad.usdz";
-		} else {
-			sceneFile = assetpath + "models/DamagedHelmet/glTF-Embedded/DamagedHelmet.gltf";
-		}
+		std::string sceneFile = assetpath + "models/DamagedHelmet/glTF-Embedded/DamagedHelmet.gltf";
 		std::string envMapFile = assetpath + "environments/papermill.ktx";
 		for (size_t i = 0; i < args.size(); i++) {
-			if (std::string(args[i]).find(ext) != std::string::npos) {
+			if ((std::string(args[i]).find(".gltf") != std::string::npos) || (std::string(args[i]).find(".glb") != std::string::npos)) {
 				std::ifstream file(args[i]);
 				if (file.good()) {
 					sceneFile = args[i];
@@ -522,30 +510,6 @@ public:
 		}
 	}
 
-	void setupNodeDescriptorSet(vkUSDZ::Node *node) {
-		if (node->mesh) {
-			VkDescriptorSetAllocateInfo descriptorSetAllocInfo{};
-			descriptorSetAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-			descriptorSetAllocInfo.descriptorPool = descriptorPool;
-			descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayouts.node;
-			descriptorSetAllocInfo.descriptorSetCount = 1;
-			VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &node->mesh->uniformBuffer.descriptorSet));
-
-			VkWriteDescriptorSet writeDescriptorSet{};
-			writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-			writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-			writeDescriptorSet.descriptorCount = 1;
-			writeDescriptorSet.dstSet = node->mesh->uniformBuffer.descriptorSet;
-			writeDescriptorSet.dstBinding = 0;
-			writeDescriptorSet.pBufferInfo = &node->mesh->uniformBuffer.descriptor;
-
-			vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
-		}
-		for (auto& child : node->children) {
-			setupNodeDescriptorSet(child);
-		}
-	}
-
 	void setupDescriptors()
 	{
 		/*
@@ -558,34 +522,28 @@ public:
 		// Environment samplers (radiance, irradiance, brdf lut)
 		imageSamplerCount += 3;
 
-		//std::vector<vkUSDZ::Model*> modellist = { &models.skybox, &models.scene };
-		for (auto &material : models.skybox.materials) {
-			imageSamplerCount += 5;
-			materialCount++;
-		}
-		for (auto node : models.skybox.linearNodes) {
-			if (node->mesh) {
-				meshCount++;
+		std::vector<vkglTF::Model*> modellist = { &models.skybox, &models.scene };
+		for (auto &model : modellist) {
+			for (auto &material : model->materials) {
+				imageSamplerCount += 5;
+				materialCount++;
 			}
-		}
-
-		for (auto &material : models.scene.materials) {
-			imageSamplerCount += 5;
-			materialCount++;
-		}
-		for (auto node : models.scene.linearNodes) {
-			if (node->mesh) {
-				meshCount++;
+			for (auto node : model->linearNodes) {
+				if (node->mesh) {
+					meshCount++;
+				}
 			}
 		}
 
 		std::vector<VkDescriptorPoolSize> poolSizes = {
 			{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, (4 + meshCount) * swapChain.imageCount },
-			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageSamplerCount * swapChain.imageCount }
+			{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, imageSamplerCount * swapChain.imageCount },
+			// One SSBO for the shader material buffer
+			{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 } 
 		};
 		VkDescriptorPoolCreateInfo descriptorPoolCI{};
 		descriptorPoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-		descriptorPoolCI.poolSizeCount = 2;
+		descriptorPoolCI.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
 		descriptorPoolCI.pPoolSizes = poolSizes.data();
 		descriptorPoolCI.maxSets = (2 + materialCount + meshCount) * swapChain.imageCount;
 		VK_CHECK_RESULT(vkCreateDescriptorPool(device, &descriptorPoolCI, nullptr, &descriptorPool));
@@ -741,6 +699,34 @@ public:
 				}
 			}
 
+			// Material Buffer
+			{
+				std::vector<VkDescriptorSetLayoutBinding> setLayoutBindings = {
+					{ 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr },
+				};
+				VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI{};
+				descriptorSetLayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+				descriptorSetLayoutCI.pBindings = setLayoutBindings.data();
+				descriptorSetLayoutCI.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
+				VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCI, nullptr, &descriptorSetLayouts.materialBuffer));
+
+				VkDescriptorSetAllocateInfo descriptorSetAllocInfo{};
+				descriptorSetAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+				descriptorSetAllocInfo.descriptorPool = descriptorPool;
+				descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayouts.materialBuffer;
+				descriptorSetAllocInfo.descriptorSetCount = 1;
+				VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &descriptorSetMaterials));
+
+				VkWriteDescriptorSet writeDescriptorSet{};
+				writeDescriptorSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+				writeDescriptorSet.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+				writeDescriptorSet.descriptorCount = 1;
+				writeDescriptorSet.dstSet = descriptorSetMaterials;
+				writeDescriptorSet.dstBinding = 0;
+				writeDescriptorSet.pBufferInfo = &shaderMaterialBuffer.descriptor;
+				vkUpdateDescriptorSets(device, 1, &writeDescriptorSet, 0, nullptr);
+			}
+
 		}
 
 		// Skybox (fixed set)
@@ -779,7 +765,8 @@ public:
 		}
 	}
 
-	void preparePipelines()
+	// Depending on material setting, we need different pipeline variants per set, e.g. one with back-face culling, one without and one with alpha-blending enabled. This function generates such a set.
+	void addPipelineSet(const std::string prefix, const std::string vertexShader, const std::string fragmentShader)
 	{
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI{};
 		inputAssemblyStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -803,8 +790,8 @@ public:
 
 		VkPipelineDepthStencilStateCreateInfo depthStencilStateCI{};
 		depthStencilStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-		depthStencilStateCI.depthTestEnable = VK_FALSE;
-		depthStencilStateCI.depthWriteEnable = VK_FALSE;
+		depthStencilStateCI.depthTestEnable = (prefix == "skybox" ? VK_FALSE : VK_TRUE);
+		depthStencilStateCI.depthWriteEnable = (prefix == "skybox" ? VK_FALSE : VK_TRUE);
 		depthStencilStateCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 		depthStencilStateCI.front = depthStencilStateCI.back;
 		depthStencilStateCI.back.compareOp = VK_COMPARE_OP_ALWAYS;
@@ -832,28 +819,29 @@ public:
 
 		// Pipeline layout
 		const std::vector<VkDescriptorSetLayout> setLayouts = {
-			descriptorSetLayouts.scene, descriptorSetLayouts.material, descriptorSetLayouts.node
+			descriptorSetLayouts.scene, descriptorSetLayouts.material, descriptorSetLayouts.node, descriptorSetLayouts.materialBuffer
 		};
 		VkPipelineLayoutCreateInfo pipelineLayoutCI{};
 		pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		pipelineLayoutCI.setLayoutCount = static_cast<uint32_t>(setLayouts.size());
 		pipelineLayoutCI.pSetLayouts = setLayouts.data();
 		VkPushConstantRange pushConstantRange{};
-		pushConstantRange.size = sizeof(PushConstBlockMaterial);
+		pushConstantRange.size = sizeof(uint32_t);
 		pushConstantRange.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 		pipelineLayoutCI.pushConstantRangeCount = 1;
 		pipelineLayoutCI.pPushConstantRanges = &pushConstantRange;
 		VK_CHECK_RESULT(vkCreatePipelineLayout(device, &pipelineLayoutCI, nullptr, &pipelineLayout));
 
 		// Vertex bindings an attributes
-		VkVertexInputBindingDescription vertexInputBinding = { 0, sizeof(vkUSDZ::Model::Vertex), VK_VERTEX_INPUT_RATE_VERTEX };
+		VkVertexInputBindingDescription vertexInputBinding = { 0, sizeof(vkglTF::Model::Vertex), VK_VERTEX_INPUT_RATE_VERTEX };
 		std::vector<VkVertexInputAttributeDescription> vertexInputAttributes = {
 			{ 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 },
 			{ 1, 0, VK_FORMAT_R32G32B32_SFLOAT, sizeof(float) * 3 },
 			{ 2, 0, VK_FORMAT_R32G32_SFLOAT, sizeof(float) * 6 },
 			{ 3, 0, VK_FORMAT_R32G32_SFLOAT, sizeof(float) * 8 },
 			{ 4, 0, VK_FORMAT_R32G32B32A32_SFLOAT, sizeof(float) * 10 },
-			{ 5, 0, VK_FORMAT_R32G32B32A32_SFLOAT, sizeof(float) * 14 }
+			{ 5, 0, VK_FORMAT_R32G32B32A32_SFLOAT, sizeof(float) * 14 },
+			{ 6, 0, VK_FORMAT_R32G32B32A32_SFLOAT, sizeof(float) * 18 }
 		};
 		VkPipelineVertexInputStateCreateInfo vertexInputStateCI{};
 		vertexInputStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -880,29 +868,18 @@ public:
 		pipelineCI.stageCount = static_cast<uint32_t>(shaderStages.size());
 		pipelineCI.pStages = shaderStages.data();
 
-		if (settings.multiSampling) {
-			multisampleStateCI.rasterizationSamples = settings.sampleCount;
-		}
+		shaderStages[0] = loadShader(device, vertexShader, VK_SHADER_STAGE_VERTEX_BIT);
+		shaderStages[1] = loadShader(device, fragmentShader, VK_SHADER_STAGE_FRAGMENT_BIT);
 
-		// Skybox pipeline (background cube)
-		shaderStages = {
-			loadShader(device, "skybox.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-			loadShader(device, "skybox.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
-		};
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.skybox));
-		for (auto shaderStage : shaderStages) {
-			vkDestroyShaderModule(device, shaderStage.module, nullptr);
-		}
-
-		// PBR pipeline
-		shaderStages = {
-			loadShader(device, "pbr.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
-			loadShader(device, "pbr_khr.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
-		};
-		depthStencilStateCI.depthWriteEnable = VK_TRUE;
-		depthStencilStateCI.depthTestEnable = VK_TRUE;
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.pbr));
-
+		VkPipeline pipeline{};
+		// Default pipeline with back-face culling
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipeline));
+		pipelines[prefix] = pipeline;
+		// Double sided
+		rasterizationStateCI.cullMode = VK_CULL_MODE_NONE;
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipeline));
+		pipelines[prefix + "_double_sided"] = pipeline;
+		// Alpha blending
 		rasterizationStateCI.cullMode = VK_CULL_MODE_NONE;
 		blendAttachmentState.blendEnable = VK_TRUE;
 		blendAttachmentState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -912,11 +889,22 @@ public:
 		blendAttachmentState.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 		blendAttachmentState.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
 		blendAttachmentState.alphaBlendOp = VK_BLEND_OP_ADD;
-		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipelines.pbrAlphaBlend));
+		VK_CHECK_RESULT(vkCreateGraphicsPipelines(device, pipelineCache, 1, &pipelineCI, nullptr, &pipeline));
+		pipelines[prefix + "_alpha_blending"] = pipeline;
 
 		for (auto shaderStage : shaderStages) {
 			vkDestroyShaderModule(device, shaderStage.module, nullptr);
 		}
+	};
+
+	void preparePipelines()
+	{
+		// Skybox pipeline (background cube)
+		addPipelineSet("skybox", "skybox.vert.spv", "skybox.frag.spv");
+		// PBR pipelines
+		addPipelineSet("pbr", "pbr.vert.spv", "material_pbr.frag.spv");
+		// KHR_materials_unlit
+		addPipelineSet("unlit", "pbr.vert.spv", "material_unlit.frag.spv");
 	}
 
 	/*
@@ -1096,7 +1084,7 @@ public:
 		dynamicStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 		dynamicStateCI.pDynamicStates = dynamicStateEnables.data();
 		dynamicStateCI.dynamicStateCount = static_cast<uint32_t>(dynamicStateEnables.size());
-
+		
 		VkPipelineVertexInputStateCreateInfo emptyInputStateCI{};
 		emptyInputStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
@@ -1117,7 +1105,7 @@ public:
 		pipelineCI.stageCount = 2;
 		pipelineCI.pStages = shaderStages.data();
 
-		// Look-up-table (from BRDF) pipeline
+		// Look-up-table (from BRDF) pipeline		
 		shaderStages = {
 			loadShader(device, "genbrdflut.vert.spv", VK_SHADER_STAGE_VERTEX_BIT),
 			loadShader(device, "genbrdflut.frag.spv", VK_SHADER_STAGE_FRAGMENT_BIT)
@@ -1180,7 +1168,7 @@ public:
 	}
 
 	/*
-		Offline generation for the cube maps used for PBR lighting
+		Offline generation for the cube maps used for PBR lighting		
 		- Irradiance cube map
 		- Pre-filterd environment cubemap
 	*/
@@ -1491,7 +1479,7 @@ public:
 			VkPipelineMultisampleStateCreateInfo multisampleStateCI{};
 			multisampleStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 			multisampleStateCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
+			
 			std::vector<VkDynamicState> dynamicStateEnables = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 			VkPipelineDynamicStateCreateInfo dynamicStateCI{};
 			dynamicStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -1499,7 +1487,7 @@ public:
 			dynamicStateCI.dynamicStateCount = static_cast<uint32_t>(dynamicStateEnables.size());
 
 			// Vertex input state
-			VkVertexInputBindingDescription vertexInputBinding = { 0, sizeof(vkUSDZ::Model::Vertex), VK_VERTEX_INPUT_RATE_VERTEX };
+			VkVertexInputBindingDescription vertexInputBinding = { 0, sizeof(vkglTF::Model::Vertex), VK_VERTEX_INPUT_RATE_VERTEX };
 			VkVertexInputAttributeDescription vertexInputAttribute = { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0 };
 
 			VkPipelineVertexInputStateCreateInfo vertexInputStateCI{};
@@ -1740,7 +1728,7 @@ public:
 		}
 	}
 
-	/*
+	/* 
 		Prepare and initialize uniform buffers containing shader parameters
 	*/
 	void prepareUniformBuffers()
@@ -1758,7 +1746,7 @@ public:
 		// Scene
 		shaderValuesScene.projection = camera.matrices.perspective;
 		shaderValuesScene.view = camera.matrices.view;
-
+		
 		// Center and scale model
 		float scale = (1.0f / std::max(models.scene.aabb[0][0], std::max(models.scene.aabb[1][1], models.scene.aabb[2][2]))) * 0.5f;
 		glm::vec3 translate = -glm::vec3(models.scene.aabb[3][0], models.scene.aabb[3][1], models.scene.aabb[3][2]);
@@ -1770,11 +1758,9 @@ public:
 		shaderValuesScene.model[2][2] = scale;
 		shaderValuesScene.model = glm::translate(shaderValuesScene.model, translate);
 
-		shaderValuesScene.camPos = glm::vec3(
-			-camera.position.z * sin(glm::radians(camera.rotation.y)) * cos(glm::radians(camera.rotation.x)),
-			-camera.position.z * sin(glm::radians(camera.rotation.x)),
-			 camera.position.z * cos(glm::radians(camera.rotation.y)) * cos(glm::radians(camera.rotation.x))
-		);
+		// Shader requires camera position in world space
+		glm::mat4 cv = glm::inverse(camera.matrices.view);
+		shaderValuesScene.camPos = glm::vec3(cv[3]);
 
 		// Skybox
 		shaderValuesSkybox.projection = camera.matrices.perspective;
@@ -1793,7 +1779,6 @@ public:
 
 	void windowResized()
 	{
-		recordCommandBuffers();
 		vkDeviceWaitIdle(device);
 		updateUniformBuffers();
 		updateOverlay();
@@ -1805,7 +1790,7 @@ public:
 
 		camera.type = Camera::CameraType::lookat;
 
-		camera.setPerspective(45.0f, (float)width / (float)height, 0.1f, 256.0f);
+		camera.setPerspective(45.0f, (float)width / (float)height, 0.01f, 256.0f);
 		camera.rotationSpeed = 0.25f;
 		camera.movementSpeed = 0.1f;
 		camera.setPosition({ 0.0f, 0.0f, 1.0f });
@@ -1843,15 +1828,12 @@ public:
 
 		loadAssets();
 		generateBRDFLUT();
-		generateCubemaps();
 		prepareUniformBuffers();
 		setupDescriptors();
 		preparePipelines();
 
 		ui = new UI(vulkanDevice, renderPass, queue, pipelineCache, settings.sampleCount);
 		updateOverlay();
-
-		recordCommandBuffers();
 
 		prepared = true;
 	}
@@ -1874,8 +1856,6 @@ public:
 		ui->pushConstBlock.scale = glm::vec2(2.0f / io.DisplaySize.x, 2.0f / io.DisplaySize.y);
 		ui->pushConstBlock.translate = glm::vec2(-1.0f);
 
-		bool updateShaderParams = false;
-		bool updateCBs = false;
 		float scale = 1.0f;
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
@@ -1884,8 +1864,8 @@ public:
 		ImGui::NewFrame();
 
 		ImGui::SetNextWindowPos(ImVec2(10, 10));
-		ImGui::SetNextWindowSize(ImVec2(200 * scale, (models.scene.animations.size() > 0 ? 440 : 360) * scale), ImGuiSetCond_Always);
-		ImGui::Begin("Vulkan glTF 2.0 + USDZ PBR", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+		ImGui::SetNextWindowSize(ImVec2(200 * scale, (models.scene.animations.size() > 0 ? 500 : 420) * scale), ImGuiSetCond_Always);
+		ImGui::Begin("Vulkan glTF 2.0 PBR", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
 		ImGui::PushItemWidth(100.0f * scale);
 
 		ui->text("www.saschawillems.de");
@@ -1897,7 +1877,6 @@ public:
 				vkDeviceWaitIdle(device);
 				loadScene(scenes[selectedScene]);
 				setupDescriptors();
-				updateCBs = true;
 			}
 #else
 			if (ui->button("Open gltf file")) {
@@ -1931,30 +1910,29 @@ public:
 					vkDeviceWaitIdle(device);
 					loadScene(filename);
 					setupDescriptors();
-					updateCBs = true;
 				}
 			}
 #endif
-			if (ui->combo("Environment", selectedEnvironment, environments)) {
+			if (ui->combo("Environment##env", selectedEnvironment, environments)) {
 				vkDeviceWaitIdle(device);
 				loadEnvironment(environments[selectedEnvironment]);
 				setupDescriptors();
-				updateCBs = true;
 			}
 		}
 
 		if (ui->header("Environment")) {
-			if (ui->checkbox("Background", &displayBackground)) {
-				updateShaderParams = true;
-			}
-			if (ui->slider("Exposure", &shaderValuesParams.exposure, 0.1f, 10.0f)) {
-				updateShaderParams = true;
-			}
-			if (ui->slider("Gamma", &shaderValuesParams.gamma, 0.1f, 4.0f)) {
-				updateShaderParams = true;
-			}
-			if (ui->slider("IBL", &shaderValuesParams.scaleIBLAmbient, 0.0f, 1.0f)) {
-				updateShaderParams = true;
+			ui->checkbox("Background", &displayBackground);
+			ui->slider("Exposure", &shaderValuesParams.exposure, 0.1f, 10.0f);
+			ui->slider("Gamma", &shaderValuesParams.gamma, 0.1f, 4.0f);
+			ui->slider("IBL", &shaderValuesParams.scaleIBLAmbient, 0.0f, 1.0f);
+		}
+
+		if (ui->header("Camera")) {
+			const std::vector<std::string> cameraTypes = { "Look at", "First Person" };
+			int32_t cameraTypeSelection = (int32_t)camera.type;
+			if (ui->combo("Type", &cameraTypeSelection, cameraTypes)) {
+				camera.type = (Camera::CameraType)cameraTypeSelection;
+				resetCamera();
 			}
 		}
 
@@ -1963,15 +1941,13 @@ public:
 				"none", "Base color", "Normal", "Occlusion", "Emissive", "Metallic", "Roughness"
 			};
 			if (ui->combo("Inputs", &debugViewInputs, debugNamesInputs)) {
-				shaderValuesParams.debugViewInputs = debugViewInputs;
-				updateShaderParams = true;
+				shaderValuesParams.debugViewInputs = static_cast<float>(debugViewInputs);
 			}
 			const std::vector<std::string> debugNamesEquation = {
 				"none", "Diff (l,n)", "F (l,h)", "G (l,v,h)", "D (h)", "Specular"
 			};
 			if (ui->combo("PBR equation", &debugViewEquation, debugNamesEquation)) {
-				shaderValuesParams.debugViewEquation = debugViewEquation;
-				updateShaderParams = true;
+				shaderValuesParams.debugViewEquation = static_cast<float>(debugViewEquation);
 			}
 		}
 
@@ -2027,21 +2003,6 @@ public:
 			ui->vertexBuffer.flush();
 			ui->indexBuffer.flush();
 
-			updateCBs = updateCBs || updateBuffers;
-		}
-
-		if (lastDisplaySize.x != io.DisplaySize.x || lastDisplaySize.y != io.DisplaySize.y) {
-			updateCBs = true;
-		}
-
-		if (updateCBs) {
-			vkDeviceWaitIdle(device);
-			recordCommandBuffers();
-			vkDeviceWaitIdle(device);
-		}
-
-		if (updateShaderParams) {
-			updateParams();
 		}
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
@@ -2057,22 +2018,28 @@ public:
 			return;
 		}
 
-		updateOverlay();
+		ui->updateTimer -= frameTimer;
+		if (ui->updateTimer <= 0.0f) {
+			updateOverlay();
+			ui->updateTimer = 1.0f / 60.0f;
+		}
 
-		VK_CHECK_RESULT(vkWaitForFences(device, 1, &waitFences[frameIndex], VK_TRUE, UINT64_MAX));
-		VK_CHECK_RESULT(vkResetFences(device, 1, &waitFences[frameIndex]));
+		VK_CHECK_RESULT(vkWaitForFences(device, 1, &waitFences[currentFrame], VK_TRUE, UINT64_MAX));
+		VK_CHECK_RESULT(vkResetFences(device, 1, &waitFences[currentFrame]));
 
-		VkResult acquire = swapChain.acquireNextImage(presentCompleteSemaphores[frameIndex], &currentBuffer);
+		VkResult acquire = swapChain.acquireNextImage(presentCompleteSemaphores[currentFrame], &imageIndex);
 		if ((acquire == VK_ERROR_OUT_OF_DATE_KHR) || (acquire == VK_SUBOPTIMAL_KHR)) {
 			windowResize();
 		}
 		else {
 			VK_CHECK_RESULT(acquire);
 		}
+		
+		recordCommandBuffer();
 
 		// Update UBOs
 		updateUniformBuffers();
-		UniformBufferSet currentUB = uniformBuffers[currentBuffer];
+		UniformBufferSet currentUB = uniformBuffers[currentFrame];
 		memcpy(currentUB.scene.mapped, &shaderValuesScene, sizeof(shaderValuesScene));
 		memcpy(currentUB.params.mapped, &shaderValuesParams, sizeof(shaderValuesParams));
 		memcpy(currentUB.skybox.mapped, &shaderValuesSkybox, sizeof(shaderValuesSkybox));
@@ -2081,15 +2048,15 @@ public:
 		VkSubmitInfo submitInfo{};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submitInfo.pWaitDstStageMask = &waitDstStageMask;
-		submitInfo.pWaitSemaphores = &presentCompleteSemaphores[frameIndex];
+		submitInfo.pWaitSemaphores = &presentCompleteSemaphores[currentFrame];
 		submitInfo.waitSemaphoreCount = 1;
-		submitInfo.pSignalSemaphores = &renderCompleteSemaphores[frameIndex];
+		submitInfo.pSignalSemaphores = &renderCompleteSemaphores[currentFrame];
 		submitInfo.signalSemaphoreCount = 1;
-		submitInfo.pCommandBuffers = &commandBuffers[currentBuffer];
+		submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
 		submitInfo.commandBufferCount = 1;
-		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, waitFences[frameIndex]));
+		VK_CHECK_RESULT(vkQueueSubmit(queue, 1, &submitInfo, waitFences[currentFrame]));
 
-		VkResult present = swapChain.queuePresent(queue, currentBuffer, renderCompleteSemaphores[frameIndex]);
+		VkResult present = swapChain.queuePresent(queue, imageIndex, renderCompleteSemaphores[currentFrame]);
 		if (!((present == VK_SUCCESS) || (present == VK_SUBOPTIMAL_KHR))) {
 			if (present == VK_ERROR_OUT_OF_DATE_KHR) {
 				windowResize();
@@ -2100,8 +2067,8 @@ public:
 			}
 		}
 
-		frameIndex += 1;
-		frameIndex %= renderAhead;
+		currentFrame += 1;
+		currentFrame %= renderAhead;
 
 		if (!paused) {
 			if (rotateModel) {
@@ -2126,43 +2093,51 @@ public:
 			updateUniformBuffers();
 		}
 	}
+
+	virtual void fileDropped(std::string filename)
+	{
+		vkDeviceWaitIdle(device);
+		loadScene(filename);
+		setupDescriptors();
+	}
+
 };
 
-VulkanExample *vulkanExample;
+VulkanApplication *vulkanApplication;
 
 // OS specific macros for the example main entry points
 #if defined(_WIN32)
 LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	if (vulkanExample != NULL)
+	if (vulkanApplication != NULL)
 	{
-		vulkanExample->handleMessages(hWnd, uMsg, wParam, lParam);
+		vulkanApplication->handleMessages(hWnd, uMsg, wParam, lParam);
 	}
 	return (DefWindowProc(hWnd, uMsg, wParam, lParam));
 }
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int)
 {
-	for (int32_t i = 0; i < __argc; i++) { VulkanExample::args.push_back(__argv[i]); };
-	vulkanExample = new VulkanExample();
-	vulkanExample->initVulkan();
-	vulkanExample->setupWindow(hInstance, WndProc);
-	vulkanExample->prepare();
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
+	for (int32_t i = 0; i < __argc; i++) { VulkanApplication::args.push_back(__argv[i]); };
+	vulkanApplication = new VulkanApplication();
+	vulkanApplication->initVulkan();
+	vulkanApplication->setupWindow(hInstance, WndProc);
+	vulkanApplication->prepare();
+	vulkanApplication->renderLoop();
+	delete(vulkanApplication);
 	return 0;
 }
 #elif defined(VK_USE_PLATFORM_ANDROID_KHR)
 // Android entry point
 void android_main(android_app* state)
 {
-	vulkanExample = new VulkanExample();
-	state->userData = vulkanExample;
-	state->onAppCmd = VulkanExample::handleAppCommand;
-	state->onInputEvent = VulkanExample::handleAppInput;
+	vulkanApplication = new VulkanApplication();
+	state->userData = vulkanApplication;
+	state->onAppCmd = VulkanApplication::handleAppCommand;
+	state->onInputEvent = VulkanApplication::handleAppInput;
 	androidApp = state;
 	vks::android::getDeviceConfig();
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
+	vulkanApplication->renderLoop();
+	delete(vulkanApplication);
 }
 #elif defined(_DIRECT2DISPLAY)
 // Linux entry point with direct to display wsi
@@ -2171,43 +2146,43 @@ static void handleEvent()
 }
 int main(const int argc, const char *argv[])
 {
-	for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
-	vulkanExample = new VulkanExample();
-	vulkanExample->initVulkan();
-	vulkanExample->prepare();
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
+	for (size_t i = 0; i < argc; i++) { VulkanApplication::args.push_back(argv[i]); };
+	vulkanApplication = new VulkanApplication();
+	vulkanApplication->initVulkan();
+	vulkanApplication->prepare();
+	vulkanApplication->renderLoop();
+	delete(vulkanApplication);
 	return 0;
 }
 #elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
 int main(const int argc, const char *argv[])
 {
-	for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
-	vulkanExample = new VulkanExample();
-	vulkanExample->initVulkan();
-	vulkanExample->setupWindow();
-	vulkanExample->prepare();
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
+	for (size_t i = 0; i < argc; i++) { VulkanApplication::args.push_back(argv[i]); };
+	vulkanApplication = new VulkanApplication();
+	vulkanApplication->initVulkan();
+	vulkanApplication->setupWindow();
+	vulkanApplication->prepare();
+	vulkanApplication->renderLoop();
+	delete(vulkanApplication);
 	return 0;
 }
 #elif defined(VK_USE_PLATFORM_XCB_KHR)
 static void handleEvent(const xcb_generic_event_t *event)
 {
-	if (vulkanExample != NULL)
+	if (vulkanApplication != NULL)
 	{
-		vulkanExample->handleEvent(event);
+		vulkanApplication->handleEvent(event);
 	}
 }
 int main(const int argc, const char *argv[])
 {
-	for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
-	vulkanExample = new VulkanExample();
-	vulkanExample->initVulkan();
-	vulkanExample->setupWindow();
-	vulkanExample->prepare();
-	vulkanExample->renderLoop();
-	delete(vulkanExample);
+	for (size_t i = 0; i < argc; i++) { VulkanApplication::args.push_back(argv[i]); };
+	vulkanApplication = new VulkanApplication();
+	vulkanApplication->initVulkan();
+	vulkanApplication->setupWindow();
+	vulkanApplication->prepare();
+	vulkanApplication->renderLoop();
+	delete(vulkanApplication);
 	return 0;
 }
 #elif defined(VK_USE_PLATFORM_MACOS_MVK)
@@ -2215,13 +2190,13 @@ int main(const int argc, const char *argv[])
 {
 	@autoreleasepool
 	{
-		for (size_t i = 0; i < argc; i++) { VulkanExample::args.push_back(argv[i]); };
-		vulkanExample = new VulkanExample();
-		vulkanExample->initVulkan();
-		vulkanExample->setupWindow();
-		vulkanExample->prepare();
-		vulkanExample->renderLoop();
-		delete(vulkanExample);
+		for (size_t i = 0; i < argc; i++) { VulkanApplication::args.push_back(argv[i]); };
+		vulkanApplication = new VulkanApplication();
+		vulkanApplication->initVulkan();
+		vulkanApplication->setupWindow();
+		vulkanApplication->prepare();
+		vulkanApplication->renderLoop();
+		delete(vulkanApplication);
 	}
 	return 0;
 }
