@@ -47,6 +47,7 @@ public:
 	} textures;
 
 	struct Models {
+		bool use_usdz{false}; // false: use vkglTF Model, true: use vkUSDZ::Model
 		vkglTF::Model scene;
 		vkUSDZ::Model usdz_scene;
 		vkglTF::Model skybox;
@@ -179,8 +180,11 @@ public:
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.material, nullptr);
 		vkDestroyDescriptorSetLayout(device, descriptorSetLayouts.node, nullptr);
 
-		models.scene.destroy(device);
-		models.usdz_scene.destroy(device);
+		if (models.use_usdz) {
+			models.usdz_scene.destroy(device);
+		} else {
+			models.scene.destroy(device);
+		}
 		models.skybox.destroy(device);
 
 		for (auto buffer : uniformBuffers) {
@@ -751,7 +755,11 @@ public:
 		// Environment samplers (radiance, irradiance, brdf lut)
 		imageSamplerCount += 3;
 
-		std::vector<vkglTF::Model*> modellist = { &models.skybox, &models.scene };
+		std::vector<vkglTF::Model*> modellist = { &models.skybox };
+		if (!models.use_usdz) {
+			modellist.push_back( &models.scene );
+		}
+
 		for (auto &model : modellist) {
 			for (auto &material : model->materials) {
 				imageSamplerCount += 5;
@@ -764,7 +772,10 @@ public:
 			}
 		}
 
-		std::vector<vkUSDZ::Model*> usdz_modellist = { &models.usdz_scene };
+		std::vector<vkUSDZ::Model*> usdz_modellist;
+		if (models.use_usdz) {
+			usdz_modellist.push_back( &models.usdz_scene );
+		}
 		for (auto &model : usdz_modellist) {
 			for (auto &material : model->materials) {
 				imageSamplerCount += 5;
@@ -874,106 +885,109 @@ public:
 			descriptorSetLayoutCI.bindingCount = static_cast<uint32_t>(setLayoutBindings.size());
 			VK_CHECK_RESULT(vkCreateDescriptorSetLayout(device, &descriptorSetLayoutCI, nullptr, &descriptorSetLayouts.material));
 
-			// TODO: either glTF materials or USDZ materials
+			if (models.use_usdz) {
 
-			// Per-Material descriptor sets
-			for (auto &material : models.scene.materials) {
-				VkDescriptorSetAllocateInfo descriptorSetAllocInfo{};
-				descriptorSetAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-				descriptorSetAllocInfo.descriptorPool = descriptorPool;
-				descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayouts.material;
-				descriptorSetAllocInfo.descriptorSetCount = 1;
-				VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &material.descriptorSet));
+        for (auto &material : models.usdz_scene.materials) {
+          VkDescriptorSetAllocateInfo descriptorSetAllocInfo{};
+          descriptorSetAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+          descriptorSetAllocInfo.descriptorPool = descriptorPool;
+          descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayouts.material;
+          descriptorSetAllocInfo.descriptorSetCount = 1;
+          VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &material.descriptorSet));
 
-				std::vector<VkDescriptorImageInfo> imageDescriptors = {
-					textures.empty.descriptor,
-					textures.empty.descriptor,
-					material.normalTexture ? material.normalTexture->descriptor : textures.empty.descriptor,
-					material.occlusionTexture ? material.occlusionTexture->descriptor : textures.empty.descriptor,
-					material.emissiveTexture ? material.emissiveTexture->descriptor : textures.empty.descriptor
-				};
+          std::vector<VkDescriptorImageInfo> imageDescriptors = {
+            textures.empty.descriptor,
+            textures.empty.descriptor,
+            material.normalTexture ? material.normalTexture->descriptor : textures.empty.descriptor,
+            material.occlusionTexture ? material.occlusionTexture->descriptor : textures.empty.descriptor,
+            material.emissiveTexture ? material.emissiveTexture->descriptor : textures.empty.descriptor
+          };
 
-				// TODO: glTF specs states that metallic roughness should be preferred, even if specular glosiness is present
+          // TODO: glTF specs states that metallic roughness should be preferred, even if specular glosiness is present
 
-				if (material.pbrWorkflows.metallicRoughness) {
-					if (material.baseColorTexture) {
-						imageDescriptors[0] = material.baseColorTexture->descriptor;
-					}
-					if (material.metallicRoughnessTexture) {
-						imageDescriptors[1] = material.metallicRoughnessTexture->descriptor;
-					}
-				}
+          if (material.pbrWorkflows.metallicRoughness) {
+            if (material.baseColorTexture) {
+              imageDescriptors[0] = material.baseColorTexture->descriptor;
+            }
+            if (material.metallicRoughnessTexture) {
+              imageDescriptors[1] = material.metallicRoughnessTexture->descriptor;
+            }
+          }
 
-				if (material.pbrWorkflows.specularGlossiness) {
-					if (material.extension.diffuseTexture) {
-						imageDescriptors[0] = material.extension.diffuseTexture->descriptor;
-					}
-					if (material.extension.specularGlossinessTexture) {
-						imageDescriptors[1] = material.extension.specularGlossinessTexture->descriptor;
-					}
-				}
+          if (material.pbrWorkflows.specularGlossiness) {
+            if (material.extension.diffuseTexture) {
+              imageDescriptors[0] = material.extension.diffuseTexture->descriptor;
+            }
+            if (material.extension.specularGlossinessTexture) {
+              imageDescriptors[1] = material.extension.specularGlossinessTexture->descriptor;
+            }
+          }
 
-				std::array<VkWriteDescriptorSet, 5> writeDescriptorSets{};
-				for (size_t i = 0; i < imageDescriptors.size(); i++) {
-					writeDescriptorSets[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-					writeDescriptorSets[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-					writeDescriptorSets[i].descriptorCount = 1;
-					writeDescriptorSets[i].dstSet = material.descriptorSet;
-					writeDescriptorSets[i].dstBinding = static_cast<uint32_t>(i);
-					writeDescriptorSets[i].pImageInfo = &imageDescriptors[i];
-				}
+          std::array<VkWriteDescriptorSet, 5> writeDescriptorSets{};
+          for (size_t i = 0; i < imageDescriptors.size(); i++) {
+            writeDescriptorSets[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptorSets[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writeDescriptorSets[i].descriptorCount = 1;
+            writeDescriptorSets[i].dstSet = material.descriptorSet;
+            writeDescriptorSets[i].dstBinding = static_cast<uint32_t>(i);
+            writeDescriptorSets[i].pImageInfo = &imageDescriptors[i];
+          }
 
-				vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+          vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+        }
+
+			} else {
+        // Per-Material descriptor sets
+        for (auto &material : models.scene.materials) {
+          VkDescriptorSetAllocateInfo descriptorSetAllocInfo{};
+          descriptorSetAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+          descriptorSetAllocInfo.descriptorPool = descriptorPool;
+          descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayouts.material;
+          descriptorSetAllocInfo.descriptorSetCount = 1;
+          VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &material.descriptorSet));
+
+          std::vector<VkDescriptorImageInfo> imageDescriptors = {
+            textures.empty.descriptor,
+            textures.empty.descriptor,
+            material.normalTexture ? material.normalTexture->descriptor : textures.empty.descriptor,
+            material.occlusionTexture ? material.occlusionTexture->descriptor : textures.empty.descriptor,
+            material.emissiveTexture ? material.emissiveTexture->descriptor : textures.empty.descriptor
+          };
+
+          // TODO: glTF specs states that metallic roughness should be preferred, even if specular glosiness is present
+
+          if (material.pbrWorkflows.metallicRoughness) {
+            if (material.baseColorTexture) {
+              imageDescriptors[0] = material.baseColorTexture->descriptor;
+            }
+            if (material.metallicRoughnessTexture) {
+              imageDescriptors[1] = material.metallicRoughnessTexture->descriptor;
+            }
+          }
+
+          if (material.pbrWorkflows.specularGlossiness) {
+            if (material.extension.diffuseTexture) {
+              imageDescriptors[0] = material.extension.diffuseTexture->descriptor;
+            }
+            if (material.extension.specularGlossinessTexture) {
+              imageDescriptors[1] = material.extension.specularGlossinessTexture->descriptor;
+            }
+          }
+
+          std::array<VkWriteDescriptorSet, 5> writeDescriptorSets{};
+          for (size_t i = 0; i < imageDescriptors.size(); i++) {
+            writeDescriptorSets[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptorSets[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writeDescriptorSets[i].descriptorCount = 1;
+            writeDescriptorSets[i].dstSet = material.descriptorSet;
+            writeDescriptorSets[i].dstBinding = static_cast<uint32_t>(i);
+            writeDescriptorSets[i].pImageInfo = &imageDescriptors[i];
+          }
+
+          vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
+        }
 			}
 
-			for (auto &material : models.usdz_scene.materials) {
-				VkDescriptorSetAllocateInfo descriptorSetAllocInfo{};
-				descriptorSetAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-				descriptorSetAllocInfo.descriptorPool = descriptorPool;
-				descriptorSetAllocInfo.pSetLayouts = &descriptorSetLayouts.material;
-				descriptorSetAllocInfo.descriptorSetCount = 1;
-				VK_CHECK_RESULT(vkAllocateDescriptorSets(device, &descriptorSetAllocInfo, &material.descriptorSet));
-
-				std::vector<VkDescriptorImageInfo> imageDescriptors = {
-					textures.empty.descriptor,
-					textures.empty.descriptor,
-					material.normalTexture ? material.normalTexture->descriptor : textures.empty.descriptor,
-					material.occlusionTexture ? material.occlusionTexture->descriptor : textures.empty.descriptor,
-					material.emissiveTexture ? material.emissiveTexture->descriptor : textures.empty.descriptor
-				};
-
-				// TODO: glTF specs states that metallic roughness should be preferred, even if specular glosiness is present
-
-				if (material.pbrWorkflows.metallicRoughness) {
-					if (material.baseColorTexture) {
-						imageDescriptors[0] = material.baseColorTexture->descriptor;
-					}
-					if (material.metallicRoughnessTexture) {
-						imageDescriptors[1] = material.metallicRoughnessTexture->descriptor;
-					}
-				}
-
-				if (material.pbrWorkflows.specularGlossiness) {
-					if (material.extension.diffuseTexture) {
-						imageDescriptors[0] = material.extension.diffuseTexture->descriptor;
-					}
-					if (material.extension.specularGlossinessTexture) {
-						imageDescriptors[1] = material.extension.specularGlossinessTexture->descriptor;
-					}
-				}
-
-				std::array<VkWriteDescriptorSet, 5> writeDescriptorSets{};
-				for (size_t i = 0; i < imageDescriptors.size(); i++) {
-					writeDescriptorSets[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-					writeDescriptorSets[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-					writeDescriptorSets[i].descriptorCount = 1;
-					writeDescriptorSets[i].dstSet = material.descriptorSet;
-					writeDescriptorSets[i].dstBinding = static_cast<uint32_t>(i);
-					writeDescriptorSets[i].pImageInfo = &imageDescriptors[i];
-				}
-
-				vkUpdateDescriptorSets(device, static_cast<uint32_t>(writeDescriptorSets.size()), writeDescriptorSets.data(), 0, NULL);
-			}
 
 			// Model node (matrices)
 			{
@@ -2056,7 +2070,7 @@ public:
 		updateUniformBuffers();
 	}
 
-	void updateUniformBuffers(bool use_usdz = false)
+	void updateUniformBuffers()
 	{
 		// Scene
 		shaderValuesScene.projection = camera.matrices.perspective;
@@ -2066,7 +2080,7 @@ public:
 		float scale;
 		glm::vec3 translate;
 		
-		if (use_usdz) {
+		if (models.use_usdz) {
       scale = (1.0f / std::max(models.usdz_scene.aabb[0][0], std::max(models.usdz_scene.aabb[1][1], models.usdz_scene.aabb[2][2]))) * 0.5f;
       translate = -glm::vec3(models.usdz_scene.aabb[3][0], models.usdz_scene.aabb[3][1], models.usdz_scene.aabb[3][2]);
       translate += -0.5f * glm::vec3(models.usdz_scene.aabb[0][0], models.usdz_scene.aabb[1][1], models.usdz_scene.aabb[2][2]);
