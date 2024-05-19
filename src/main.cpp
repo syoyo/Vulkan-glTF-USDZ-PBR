@@ -47,7 +47,7 @@ public:
 	} textures;
 
 	struct Models {
-		bool use_usdz{false}; // false: use vkglTF Model, true: use vkUSDZ::Model
+		bool use_usdz{true}; // false: use vkglTF Model, true: use vkUSDZ::Model
 		vkglTF::Model scene;
 		vkUSDZ::Model usdz_scene;
 		vkglTF::Model skybox;
@@ -626,13 +626,27 @@ public:
 
 	void loadScene(std::string filename)
 	{
-		std::cout << "Loading scene from " << filename << std::endl;
+		std::cout << "Loading glTF scene from " << filename << std::endl;
 		models.scene.destroy(device);
 		animationIndex = 0;
 		animationTimer = 0.0f;
 		auto tStart = std::chrono::high_resolution_clock::now();
 		models.scene.loadFromFile(filename, vulkanDevice, queue);
 		createMaterialBuffer();
+		auto tFileLoad = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - tStart).count();
+		std::cout << "Loading took " << tFileLoad << " ms" << std::endl;
+		resetCamera();
+	}
+
+	void loadSceneUSDZ(std::string filename)
+	{
+		std::cout << "Loading USDZ scene from " << filename << std::endl;
+		models.usdz_scene.destroy(device);
+		animationIndex = 0;
+		animationTimer = 0.0f;
+		auto tStart = std::chrono::high_resolution_clock::now();
+		models.usdz_scene.loadFromFile(filename, vulkanDevice, queue);
+		createMaterialBufferUSDZ();
 		auto tFileLoad = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - tStart).count();
 		std::cout << "Loading took " << tFileLoad << " ms" << std::endl;
 		resetCamera();
@@ -650,7 +664,7 @@ public:
 		generateCubemaps();
 	}
 
-	void loadAssets()
+	void loadAssets(bool use_usdz = true)
 	{
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
 		tinygltf::asset_manager = androidApp->activity->assetManager;
@@ -667,16 +681,37 @@ public:
 
 		textures.empty.loadFromFile(assetpath + "textures/empty.ktx", VK_FORMAT_R8G8B8A8_UNORM, vulkanDevice, queue);
 
-		std::string sceneFile = assetpath + "models/DamagedHelmet/glTF-Embedded/DamagedHelmet.gltf";
+		std::string sceneFile;
+
+		if (use_usdz) {
+			sceneFile = assetpath + "models/DamagedHelmet/USDZ/DamagedHelmet.usdz";
+		}
+		else {
+			sceneFile = assetpath + "models/DamagedHelmet/glTF-Embedded/DamagedHelmet.gltf";
+		}
+
 		std::string envMapFile = assetpath + "environments/papermill.ktx";
 		for (size_t i = 0; i < args.size(); i++) {
-			if ((std::string(args[i]).find(".gltf") != std::string::npos) || (std::string(args[i]).find(".glb") != std::string::npos)) {
-				std::ifstream file(args[i]);
-				if (file.good()) {
-					sceneFile = args[i];
-				} else {
-					std::cout << "could not load \"" << args[i] << "\"" << std::endl;
-				}
+			if (use_usdz) {
+        if ((std::string(args[i]).find(".usd") != std::string::npos) || (std::string(args[i]).find(".usda") != std::string::npos) ||
+            (std::string(args[i]).find(".usdc") != std::string::npos) || (std::string(args[i]).find(".usdz") != std::string::npos)) {
+          std::ifstream file(args[i]);
+          if (file.good()) {
+            sceneFile = args[i];
+          } else {
+            std::cout << "could not load \"" << args[i] << "\"" << std::endl;
+          }
+        }
+			}
+			else {
+        if ((std::string(args[i]).find(".gltf") != std::string::npos) || (std::string(args[i]).find(".glb") != std::string::npos)) {
+          std::ifstream file(args[i]);
+          if (file.good()) {
+            sceneFile = args[i];
+          } else {
+            std::cout << "could not load \"" << args[i] << "\"" << std::endl;
+          }
+        }
 			}
 			if (std::string(args[i]).find(".ktx") != std::string::npos) {
 				std::ifstream file(args[i]);
@@ -689,7 +724,11 @@ public:
 			}
 		}
 
-		loadScene(sceneFile.c_str());
+		if (use_usdz) {
+      loadSceneUSDZ(sceneFile.c_str());
+		} else {
+      loadScene(sceneFile.c_str());
+		}
 		models.skybox.loadFromFile(assetpath + "models/Box/glTF-Embedded/Box.gltf", vulkanDevice, queue);
 
 		loadEnvironment(envMapFile.c_str());
@@ -2435,7 +2474,11 @@ public:
 	virtual void fileDropped(std::string filename)
 	{
 		vkDeviceWaitIdle(device);
-		loadScene(filename);
+		if (models.use_usdz) {
+      loadSceneUSDZ(filename);
+		} else {
+      loadScene(filename);
+		}
 		setupDescriptors();
 	}
 

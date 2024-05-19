@@ -1151,7 +1151,7 @@ namespace vkUSDZ
 		}
 		else {
 			// TODO: throw
-			std::cerr << "Could not load gltf file: " << error << std::endl;
+			std::cerr << "Could not load USDZ file: " << error << std::endl;
 			return;
 		}
 
