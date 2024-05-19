@@ -2412,7 +2412,12 @@ public:
 			VK_CHECK_RESULT(acquire);
 		}
 		
-		recordCommandBuffer();
+		if (models.use_usdz) {
+      recordCommandBufferUSDZ();
+		}
+		else {
+      recordCommandBuffer();
+		}
 
 		// Update UBOs
 		updateUniformBuffers();
