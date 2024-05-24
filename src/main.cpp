@@ -636,6 +636,8 @@ public:
 		auto tFileLoad = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - tStart).count();
 		std::cout << "Loading took " << tFileLoad << " ms" << std::endl;
 		resetCamera();
+
+		models.use_usdz = false;
 	}
 
 	void loadSceneUSDZ(std::string filename)
@@ -650,6 +652,8 @@ public:
 		auto tFileLoad = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - tStart).count();
 		std::cout << "Loading took " << tFileLoad << " ms" << std::endl;
 		resetCamera();
+
+		models.use_usdz = true;
 	}
 
 	void loadEnvironment(std::string filename)
@@ -668,7 +672,11 @@ public:
 	{
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
 		tinygltf::asset_manager = androidApp->activity->assetManager;
-		readDirectory(assetpath + "models", "gltf", scenes, true);
+		if (use_usdz) {
+			readDirectory(assetpath + "models", "usdz", scenes, true);
+		} else {
+			readDirectory(assetpath + "models", "gltf", scenes, true);
+		}
 #else
 		struct stat info;
 		if (stat(assetpath.c_str(), &info) != 0) {
@@ -692,27 +700,25 @@ public:
 
 		std::string envMapFile = assetpath + "environments/papermill.ktx";
 		for (size_t i = 0; i < args.size(); i++) {
-			if (use_usdz) {
-        if ((std::string(args[i]).find(".usd") != std::string::npos) || (std::string(args[i]).find(".usda") != std::string::npos) ||
-            (std::string(args[i]).find(".usdc") != std::string::npos) || (std::string(args[i]).find(".usdz") != std::string::npos)) {
-          std::ifstream file(args[i]);
-          if (file.good()) {
-            sceneFile = args[i];
-          } else {
-            std::cout << "could not load \"" << args[i] << "\"" << std::endl;
-          }
+      if ((std::string(args[i]).find(".usd") != std::string::npos) || (std::string(args[i]).find(".usda") != std::string::npos) ||
+          (std::string(args[i]).find(".usdc") != std::string::npos) || (std::string(args[i]).find(".usdz") != std::string::npos)) {
+        std::ifstream file(args[i]);
+        if (file.good()) {
+          sceneFile = args[i];
+					use_usdz = true;
+        } else {
+          std::cout << "could not load \"" << args[i] << "\"" << std::endl;
         }
-			}
-			else {
-        if ((std::string(args[i]).find(".gltf") != std::string::npos) || (std::string(args[i]).find(".glb") != std::string::npos)) {
-          std::ifstream file(args[i]);
-          if (file.good()) {
-            sceneFile = args[i];
-          } else {
-            std::cout << "could not load \"" << args[i] << "\"" << std::endl;
-          }
+      }
+      if ((std::string(args[i]).find(".gltf") != std::string::npos) || (std::string(args[i]).find(".glb") != std::string::npos)) {
+        std::ifstream file(args[i]);
+        if (file.good()) {
+          sceneFile = args[i];
+					use_usdz = false;
+        } else {
+          std::cout << "could not load \"" << args[i] << "\"" << std::endl;
         }
-			}
+      }
 			if (std::string(args[i]).find(".ktx") != std::string::npos) {
 				std::ifstream file(args[i]);
 				if (file.good()) {
@@ -2203,7 +2209,8 @@ public:
 			VK_CHECK_RESULT(vkAllocateCommandBuffers(device, &cmdBufAllocateInfo, commandBuffers.data()));
 		}
 
-		loadAssets();
+		bool use_usdz = true;
+		loadAssets(use_usdz);
 		generateBRDFLUT();
 		prepareUniformBuffers();
 		setupDescriptors();
@@ -2241,7 +2248,9 @@ public:
 		ImGui::NewFrame();
 
 		ImGui::SetNextWindowPos(ImVec2(10, 10));
-		ImGui::SetNextWindowSize(ImVec2(200 * scale, (models.scene.animations.size() > 0 ? 500 : 420) * scale), ImGuiSetCond_Always);
+		bool has_animation = models.use_usdz ? (models.usdz_scene.animations.size() > 0) : (models.scene.animations.size() > 0);
+		
+		ImGui::SetNextWindowSize(ImVec2(200 * scale, (has_animation ? 500 : 420) * scale), ImGuiSetCond_Always);
 		ImGui::Begin("Vulkan glTF 2.0 PBR", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
 		ImGui::PushItemWidth(100.0f * scale);
 
@@ -2328,15 +2337,28 @@ public:
 			}
 		}
 
-		if (models.scene.animations.size() > 0) {
-			if (ui->header("Animations")) {
-				ui->checkbox("Animate", &animate);
-				std::vector<std::string> animationNames;
-				for (auto animation : models.scene.animations) {
-					animationNames.push_back(animation.name);
-				}
-				ui->combo("Animation", &animationIndex, animationNames);
-			}
+		if (models.use_usdz) {
+      if (models.usdz_scene.animations.size() > 0) {
+        if (ui->header("Animations")) {
+          ui->checkbox("Animate", &animate);
+          std::vector<std::string> animationNames;
+          for (auto animation : models.usdz_scene.animations) {
+            animationNames.push_back(animation.name);
+          }
+          ui->combo("Animation", &animationIndex, animationNames);
+        }
+      }
+		} else {
+      if (models.scene.animations.size() > 0) {
+        if (ui->header("Animations")) {
+          ui->checkbox("Animate", &animate);
+          std::vector<std::string> animationNames;
+          for (auto animation : models.scene.animations) {
+            animationNames.push_back(animation.name);
+          }
+          ui->combo("Animation", &animationIndex, animationNames);
+        }
+      }
 		}
 
 		ImGui::PopItemWidth();
@@ -2459,12 +2481,22 @@ public:
 					modelrot.y -= 360.0f;
 				}
 			}
-			if ((animate) && (models.scene.animations.size() > 0)) {
-				animationTimer += frameTimer;
-				if (animationTimer > models.scene.animations[animationIndex].end) {
-					animationTimer -= models.scene.animations[animationIndex].end;
-				}
-				models.scene.updateAnimation(animationIndex, animationTimer);
+			if (models.use_usdz) {
+        if ((animate) && (models.usdz_scene.animations.size() > 0)) {
+          animationTimer += frameTimer;
+          if (animationTimer > models.usdz_scene.animations[animationIndex].end) {
+            animationTimer -= models.usdz_scene.animations[animationIndex].end;
+          }
+          models.usdz_scene.updateAnimation(animationIndex, animationTimer);
+        }
+			} else {
+        if ((animate) && (models.scene.animations.size() > 0)) {
+          animationTimer += frameTimer;
+          if (animationTimer > models.scene.animations[animationIndex].end) {
+            animationTimer -= models.scene.animations[animationIndex].end;
+          }
+          models.scene.updateAnimation(animationIndex, animationTimer);
+        }
 			}
 			updateParams();
 			if (rotateModel) {
