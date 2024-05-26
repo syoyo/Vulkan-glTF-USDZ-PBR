@@ -163,7 +163,7 @@ public:
 
 	VulkanApplication() : VulkanExampleBase()
 	{
-		title = "Vulkan glTF 2.0 PBR - (C) Sascha Willems (www.saschawillems.de)";
+		title = "Vulkan USDZ+glTF 2.0 PBR - (C) Sascha Willems (www.saschawillems.de)";
 #if defined(TINYGLTF_ENABLE_DRACO)
 		std::cout << "Draco mesh compression is enabled" << std::endl;
 #endif
@@ -2251,7 +2251,7 @@ public:
 		bool has_animation = models.use_usdz ? (models.usdz_scene.animations.size() > 0) : (models.scene.animations.size() > 0);
 		
 		ImGui::SetNextWindowSize(ImVec2(200 * scale, (has_animation ? 500 : 420) * scale), ImGuiSetCond_Always);
-		ImGui::Begin("Vulkan glTF 2.0 PBR", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
+		ImGui::Begin("Vulkan USDZ+glTF 2.0 PBR", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
 		ImGui::PushItemWidth(100.0f * scale);
 
 		ui->text("www.saschawillems.de");

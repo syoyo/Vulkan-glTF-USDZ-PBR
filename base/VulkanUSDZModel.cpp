@@ -482,7 +482,6 @@ namespace vkUSDZ
 			}
 		}
 
-#if 1 
 		// Node contains mesh data
 		if ((node.nodeType == tinyusdz::tydra::NodeType::Mesh) && (node.id > -1)) {
 			assert(node.id < scene.meshes.size());
@@ -527,89 +526,75 @@ namespace vkUSDZ
 					vertexCount = rmesh.points.size();
 					posByteStride = 3;
 
-#if 0
-					if (primitive.attributes.find("NORMAL") != primitive.attributes.end()) {
-						const tinyusdz::Accessor &normAccessor = model.accessors[primitive.attributes.find("NORMAL")->second];
-						const tinyusdz::BufferView &normView = model.bufferViews[normAccessor.bufferView];
-						bufferNormals = reinterpret_cast<const float *>(&(model.buffers[normView.buffer].data[normAccessor.byteOffset + normView.byteOffset]));
-						normByteStride = normAccessor.ByteStride(normView) ? (normAccessor.ByteStride(normView) / sizeof(float)) : tinyusdz::GetNumComponentsInType(TINYGLTF_TYPE_VEC3);
+					if ((rmesh.normals.vertex_count() > 0) && rmesh.normals.is_vertex() && (rmesh.normals.format == tinyusdz::tydra::VertexAttributeFormat::Vec3)) {
+						bufferNormals = reinterpret_cast<const float *>(rmesh.normals.buffer());
+						normByteStride = 3;
 					}
 
-					// UVs
-					if (primitive.attributes.find("TEXCOORD_0") != primitive.attributes.end()) {
-						const tinyusdz::Accessor &uvAccessor = model.accessors[primitive.attributes.find("TEXCOORD_0")->second];
-						const tinyusdz::BufferView &uvView = model.bufferViews[uvAccessor.bufferView];
-						bufferTexCoordSet0 = reinterpret_cast<const float *>(&(model.buffers[uvView.buffer].data[uvAccessor.byteOffset + uvView.byteOffset]));
-						uv0ByteStride = uvAccessor.ByteStride(uvView) ? (uvAccessor.ByteStride(uvView) / sizeof(float)) : tinyusdz::GetNumComponentsInType(TINYGLTF_TYPE_VEC2);
-					}
-					if (primitive.attributes.find("TEXCOORD_1") != primitive.attributes.end()) {
-						const tinyusdz::Accessor &uvAccessor = model.accessors[primitive.attributes.find("TEXCOORD_1")->second];
-						const tinyusdz::BufferView &uvView = model.bufferViews[uvAccessor.bufferView];
-						bufferTexCoordSet1 = reinterpret_cast<const float *>(&(model.buffers[uvView.buffer].data[uvAccessor.byteOffset + uvView.byteOffset]));
-						uv1ByteStride = uvAccessor.ByteStride(uvView) ? (uvAccessor.ByteStride(uvView) / sizeof(float)) : tinyusdz::GetNumComponentsInType(TINYGLTF_TYPE_VEC2);
+					// FIXME: slot is hardcoded a.t.m.
+					if (rmesh.texcoords.count(0)) {
+            if ((rmesh.texcoords.at(0).vertex_count() > 0) && rmesh.texcoords.at(0).is_vertex() && (rmesh.texcoords.at(0).format == tinyusdz::tydra::VertexAttributeFormat::Vec2)) {
+              bufferTexCoordSet0 = reinterpret_cast<const float *>(rmesh.texcoords.at(0).buffer());
+              uv0ByteStride = 2;
+            }
 					}
 
-					// Vertex colors
-					if (primitive.attributes.find("COLOR_0") != primitive.attributes.end()) {
-						const tinyusdz::Accessor& accessor = model.accessors[primitive.attributes.find("COLOR_0")->second];
-						const tinyusdz::BufferView& view = model.bufferViews[accessor.bufferView];
-						bufferColorSet0 = reinterpret_cast<const float*>(&(model.buffers[view.buffer].data[accessor.byteOffset + view.byteOffset]));
-						color0ByteStride = accessor.ByteStride(view) ? (accessor.ByteStride(view) / sizeof(float)) : tinyusdz::GetNumComponentsInType(TINYGLTF_TYPE_VEC3);
+					if (rmesh.texcoords.count(1)) {
+            if ((rmesh.texcoords.at(1).vertex_count() > 0) && rmesh.texcoords.at(1).is_vertex() && (rmesh.texcoords.at(1).format == tinyusdz::tydra::VertexAttributeFormat::Vec2)) {
+              bufferTexCoordSet1 = reinterpret_cast<const float *>(rmesh.texcoords.at(1).buffer());
+              uv1ByteStride = 2;
+            }
+					}
+
+					if ((rmesh.vertex_colors.vertex_count() > 0) && rmesh.vertex_colors.is_vertex() && (rmesh.vertex_colors.format == tinyusdz::tydra::VertexAttributeFormat::Vec3)) {
+						bufferColorSet0 = reinterpret_cast<const float *>(rmesh.vertex_colors.buffer());
+						color0ByteStride = 3;
 					}
 
 					// Skinning
-					// Joints
-					if (primitive.attributes.find("JOINTS_0") != primitive.attributes.end()) {
-						const tinyusdz::Accessor &jointAccessor = model.accessors[primitive.attributes.find("JOINTS_0")->second];
-						const tinyusdz::BufferView &jointView = model.bufferViews[jointAccessor.bufferView];
-						bufferJoints = &(model.buffers[jointView.buffer].data[jointAccessor.byteOffset + jointView.byteOffset]);
-						jointComponentType = jointAccessor.componentType;
-						jointByteStride = jointAccessor.ByteStride(jointView) ? (jointAccessor.ByteStride(jointView) / tinyusdz::GetComponentSizeInBytes(jointComponentType)) : tinyusdz::GetNumComponentsInType(TINYGLTF_TYPE_VEC4);
-					}
+					// Up to 4 bones
+					uint32_t num_skin_elements = (std::max)(4, rmesh.joint_and_weights.elementSize);
 
-					if (primitive.attributes.find("WEIGHTS_0") != primitive.attributes.end()) {
-						const tinyusdz::Accessor &weightAccessor = model.accessors[primitive.attributes.find("WEIGHTS_0")->second];
-						const tinyusdz::BufferView &weightView = model.bufferViews[weightAccessor.bufferView];
-						bufferWeights = reinterpret_cast<const float *>(&(model.buffers[weightView.buffer].data[weightAccessor.byteOffset + weightView.byteOffset]));
-						weightByteStride = weightAccessor.ByteStride(weightView) ? (weightAccessor.ByteStride(weightView) / sizeof(float)) : tinyusdz::GetNumComponentsInType(TINYGLTF_TYPE_VEC4);
-					}
-
-					hasSkin = (bufferJoints && bufferWeights);
-#endif
+					hasSkin = ((num_skin_elements > 0) && rmesh.joint_and_weights.jointIndices.size() && rmesh.joint_and_weights.jointWeights.size());
 
 					for (size_t v = 0; v < vertexCount; v++) {
 						Vertex& vert = loaderInfo.vertexBuffer[loaderInfo.vertexPos];
 						vert.pos = glm::vec4(glm::make_vec3(&bufferPos[v * posByteStride]), 1.0f);
+						posMin[0] = (std::min)(posMin[0], vert.pos[0]);
+						posMin[1] = (std::min)(posMin[1], vert.pos[1]);
+						posMin[2] = (std::min)(posMin[2], vert.pos[2]);
+						posMax[0] = (std::max)(posMax[0], vert.pos[0]);
+						posMax[1] = (std::max)(posMax[1], vert.pos[1]);
+						posMax[2] = (std::max)(posMax[2], vert.pos[2]);
 						vert.normal = glm::normalize(glm::vec3(bufferNormals ? glm::make_vec3(&bufferNormals[v * normByteStride]) : glm::vec3(0.0f)));
 						vert.uv0 = bufferTexCoordSet0 ? glm::make_vec2(&bufferTexCoordSet0[v * uv0ByteStride]) : glm::vec3(0.0f);
 						vert.uv1 = bufferTexCoordSet1 ? glm::make_vec2(&bufferTexCoordSet1[v * uv1ByteStride]) : glm::vec3(0.0f);
+						// FIXME: work around. we need to flip texcoord.y for some reason(handness?)
+						vert.uv0[1] = -vert.uv0[1];
+						vert.uv1[1] = -vert.uv1[1];
+
 						vert.color = bufferColorSet0 ? glm::make_vec4(&bufferColorSet0[v * color0ByteStride]) : glm::vec4(1.0f);
 
 						if (hasSkin)
 						{
-#if 0 // TODO
-							switch (jointComponentType) {
-							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: {
-								const uint16_t *buf = static_cast<const uint16_t*>(bufferJoints);
-								vert.joint0 = glm::vec4(glm::make_vec4(&buf[v * jointByteStride]));
-								break;
+							if (num_skin_elements == 1) {
+								vert.joint0 = glm::vec4(rmesh.joint_and_weights.jointIndices[v], 0, 0, 0);
+								vert.weight0 = glm::vec4(rmesh.joint_and_weights.jointWeights[v], 0, 0, 0);
+							} else if (num_skin_elements == 2) {
+								vert.joint0 = glm::vec4(rmesh.joint_and_weights.jointIndices[v * 2 + 0], rmesh.joint_and_weights.jointIndices[v * 2 + 1], 0, 0);
+								vert.weight0 = glm::vec4(rmesh.joint_and_weights.jointWeights[v * 2 + 0], rmesh.joint_and_weights.jointWeights[v * 2 + 1], 0, 0);
+							} else if (num_skin_elements == 3) {
+								vert.joint0 = glm::vec4(rmesh.joint_and_weights.jointIndices[v * 3 + 0], rmesh.joint_and_weights.jointIndices[v * 3 + 1], rmesh.joint_and_weights.jointIndices[v * 3 + 2], 0);
+								vert.weight0 = glm::vec4(rmesh.joint_and_weights.jointWeights[v * 3 + 0], rmesh.joint_and_weights.jointWeights[v * 3 + 1], rmesh.joint_and_weights.jointWeights[v * 3 + 2], 0);
+							} else {
+								vert.joint0 = glm::vec4(glm::make_vec4(&rmesh.joint_and_weights.jointIndices[v * rmesh.joint_and_weights.elementSize]));
+								vert.weight0 = glm::vec4(glm::make_vec4(&rmesh.joint_and_weights.jointWeights[v * rmesh.joint_and_weights.elementSize]));
 							}
-							case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE: {
-								const uint8_t *buf = static_cast<const uint8_t*>(bufferJoints);
-								vert.joint0 = glm::vec4(glm::make_vec4(&buf[v * jointByteStride]));
-								break;
-							}
-							default:
-								// Not supported by spec
-								std::cerr << "Joint component type " << jointComponentType << " not supported!" << std::endl;
-								break;
-							}
-#endif
 						}
 						else {
 							vert.joint0 = glm::vec4(0.0f);
+							vert.weight0 = glm::vec4(0.0f);
 						}
-						vert.weight0 = hasSkin ? glm::make_vec4(&bufferWeights[v * weightByteStride]) : glm::vec4(0.0f);
 						// Fix for all zero weights
 						if (glm::length(vert.weight0) == 0.0f) {
 							vert.weight0 = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
@@ -642,7 +627,6 @@ namespace vkUSDZ
 			}
 			newNode->mesh = newMesh;
 		}
-#endif
 		if (parent) {
 			parent->children.push_back(newNode);
 		} else {
@@ -804,53 +788,9 @@ namespace vkUSDZ
 				material.baseColorFactor.g = rmat.surfaceShader.diffuseColor.value[1];
 				material.baseColorFactor.b = rmat.surfaceShader.diffuseColor.value[2];
 			}
-#if 0 // TODO
-			if (mat.values.find("metallicRoughnessTexture") != mat.values.end()) {
-				material.metallicRoughnessTexture = &textures[mat.values["metallicRoughnessTexture"].TextureIndex()];
-				material.texCoordSets.metallicRoughness = mat.values["metallicRoughnessTexture"].TextureTexCoord();
-			}
-			if (mat.values.find("roughnessFactor") != mat.values.end()) {
-				material.roughnessFactor = static_cast<float>(mat.values["roughnessFactor"].Factor());
-			}
-			if (mat.values.find("metallicFactor") != mat.values.end()) {
-				material.metallicFactor = static_cast<float>(mat.values["metallicFactor"].Factor());
-			}
-			if (mat.values.find("baseColorFactor") != mat.values.end()) {
-				material.baseColorFactor = glm::make_vec4(mat.values["baseColorFactor"].ColorFactor().data());
-			}				
-			if (mat.additionalValues.find("normalTexture") != mat.additionalValues.end()) {
-				material.normalTexture = &textures[mat.additionalValues["normalTexture"].TextureIndex()];
-				material.texCoordSets.normal = mat.additionalValues["normalTexture"].TextureTexCoord();
-			}
-			if (mat.additionalValues.find("emissiveTexture") != mat.additionalValues.end()) {
-				material.emissiveTexture = &textures[mat.additionalValues["emissiveTexture"].TextureIndex()];
-				material.texCoordSets.emissive = mat.additionalValues["emissiveTexture"].TextureTexCoord();
-			}
-			if (mat.additionalValues.find("occlusionTexture") != mat.additionalValues.end()) {
-				material.occlusionTexture = &textures[mat.additionalValues["occlusionTexture"].TextureIndex()];
-				material.texCoordSets.occlusion = mat.additionalValues["occlusionTexture"].TextureTexCoord();
-			}
-			if (mat.additionalValues.find("alphaMode") != mat.additionalValues.end()) {
-				tinyusdz::Parameter param = mat.additionalValues["alphaMode"];
-				if (param.string_value == "BLEND") {
-					material.alphaMode = Material::ALPHAMODE_BLEND;
-				}
-				if (param.string_value == "MASK") {
-					material.alphaCutoff = 0.5f;
-					material.alphaMode = Material::ALPHAMODE_MASK;
-				}
-			}
-			if (mat.additionalValues.find("alphaCutoff") != mat.additionalValues.end()) {
-				material.alphaCutoff = static_cast<float>(mat.additionalValues["alphaCutoff"].Factor());
-			}
-			if (mat.additionalValues.find("emissiveFactor") != mat.additionalValues.end()) {
-				material.emissiveFactor = glm::vec4(glm::make_vec3(mat.additionalValues["emissiveFactor"].ColorFactor().data()), 1.0);
-			}
 
-			// Extensions
-			// @TODO: Find out if there is a nicer way of reading these properties with recent tinyusdz headers
-			if (mat.extensions.find("KHR_materials_pbrSpecularGlossiness") != mat.extensions.end()) {
-				auto ext = mat.extensions.find("KHR_materials_pbrSpecularGlossiness");
+			if (rmat.surfaceShader.useSpecularWorkflow) {
+#if 0 // TODO
 				if (ext->second.Has("specularGlossinessTexture")) {
 					auto index = ext->second.Get("specularGlossinessTexture").Get("index");
 					material.extension.specularGlossinessTexture = &textures[index.Get<int>()];
@@ -877,6 +817,61 @@ namespace vkUSDZ
 					}
 				}
 			}
+#endif
+			} else {
+
+				// TODO: Combine metallic + roughness texture
+
+#if 0 // TODO
+			if (mat.values.find("metallicRoughnessTexture") != mat.values.end()) {
+				material.metallicRoughnessTexture = &textures[mat.values["metallicRoughnessTexture"].TextureIndex()];
+				material.texCoordSets.metallicRoughness = mat.values["metallicRoughnessTexture"].TextureTexCoord();
+			}
+			if (mat.values.find("roughnessFactor") != mat.values.end()) {
+				material.roughnessFactor = static_cast<float>(mat.values["roughnessFactor"].Factor());
+			}
+			if (mat.values.find("metallicFactor") != mat.values.end()) {
+				material.metallicFactor = static_cast<float>(mat.values["metallicFactor"].Factor());
+			}
+#endif
+			}
+
+			if (rmat.surfaceShader.normal.is_texture()) {
+				material.normalTexture = &textures[size_t(rmat.surfaceShader.normal.texture_id)];
+				material.texCoordSets.normal = 0;
+			}
+
+			if (rmat.surfaceShader.emissiveColor.is_texture()) {
+				material.emissiveTexture = &textures[size_t(rmat.surfaceShader.emissiveColor.texture_id)];
+				material.texCoordSets.emissive = 0;
+			} else {
+				material.emissiveFactor.r = rmat.surfaceShader.emissiveColor.value[0];
+				material.emissiveFactor.g = rmat.surfaceShader.emissiveColor.value[1];
+				material.emissiveFactor.b = rmat.surfaceShader.emissiveColor.value[2];
+			}
+
+			if (rmat.surfaceShader.occlusion.is_texture()) {
+				material.occlusionTexture = &textures[size_t(rmat.surfaceShader.occlusion.texture_id)];
+				material.texCoordSets.occlusion = 0;
+			}
+
+#if 0 // TODO
+			if (mat.additionalValues.find("alphaMode") != mat.additionalValues.end()) {
+				tinyusdz::Parameter param = mat.additionalValues["alphaMode"];
+				if (param.string_value == "BLEND") {
+					material.alphaMode = Material::ALPHAMODE_BLEND;
+				}
+				if (param.string_value == "MASK") {
+					material.alphaCutoff = 0.5f;
+					material.alphaMode = Material::ALPHAMODE_MASK;
+				}
+			}
+			if (mat.additionalValues.find("alphaCutoff") != mat.additionalValues.end()) {
+				material.alphaCutoff = static_cast<float>(mat.additionalValues["alphaCutoff"].Factor());
+			}
+
+			// Extensions
+			// @TODO: Find out if there is a nicer way of reading these properties with recent tinygltf headers
 
 			if (mat.extensions.find("KHR_materials_unlit") != mat.extensions.end()) {
 				material.unlit = true;
