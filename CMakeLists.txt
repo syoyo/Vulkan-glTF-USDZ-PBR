@@ -17,6 +17,8 @@ include_directories(external/gli)
 include_directories(external/imgui)
 include_directories(external/tinygltf)
 include_directories(external/tinyusdz/src)
+include_directories(external/basisu/transcoder)
+include_directories(external/basisu/zstd)
 include_directories(base)
 
 

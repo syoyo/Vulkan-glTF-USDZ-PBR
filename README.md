@@ -32,6 +32,7 @@ Supported extensions:
 * KHR_materials_pbrSpecularGlossiness
 * KHR_materials_unlit
 * KHR_materials_emissive_strength
+* KHR_texture_basisu
 
 ## Loading different scenes
 
@@ -42,6 +43,8 @@ To load a different scene instead, specify the glTF model file name as a command
 ```
 Vulkan-glTF-pbr "PATH-TO-glTF-Sample-Models\2.0\BrainStem\glTF\brainstem.gltf"
 ```
+
+On Windows the application supports drag and drop. You can simply drop a `.gltf` or `.glb` file to load onto the main window.
 
 ## USDZ 2.0 Model loading
 
@@ -167,4 +170,3 @@ In order to enable support for loading Draco compressed glTF files you need to:
 * [glTF format specification](https://github.com/KhronosGroup/glTF)
 * [glTF Sample Models](https://github.com/KhronosGroup/glTF-Sample-Models)
 * [tiny glTF library](https://github.com/syoyo/tinygltf)
-* [Environment maps from sIBL Archive](http://www.hdrlabs.com/sibl/archive.html)
