@@ -578,21 +578,22 @@ namespace vkUSDZ
 						if (hasSkin)
 						{
 							if (num_skin_elements == 1) {
-								vert.joint0 = glm::vec4(rmesh.joint_and_weights.jointIndices[v], 0, 0, 0);
+								vert.joint0 = glm::uvec4(rmesh.joint_and_weights.jointIndices[v], 0, 0, 0);
 								vert.weight0 = glm::vec4(rmesh.joint_and_weights.jointWeights[v], 0, 0, 0);
 							} else if (num_skin_elements == 2) {
-								vert.joint0 = glm::vec4(rmesh.joint_and_weights.jointIndices[v * 2 + 0], rmesh.joint_and_weights.jointIndices[v * 2 + 1], 0, 0);
+								vert.joint0 = glm::uvec4(rmesh.joint_and_weights.jointIndices[v * 2 + 0], rmesh.joint_and_weights.jointIndices[v * 2 + 1], 0, 0);
 								vert.weight0 = glm::vec4(rmesh.joint_and_weights.jointWeights[v * 2 + 0], rmesh.joint_and_weights.jointWeights[v * 2 + 1], 0, 0);
 							} else if (num_skin_elements == 3) {
-								vert.joint0 = glm::vec4(rmesh.joint_and_weights.jointIndices[v * 3 + 0], rmesh.joint_and_weights.jointIndices[v * 3 + 1], rmesh.joint_and_weights.jointIndices[v * 3 + 2], 0);
+								vert.joint0 = glm::uvec4(rmesh.joint_and_weights.jointIndices[v * 3 + 0], rmesh.joint_and_weights.jointIndices[v * 3 + 1], rmesh.joint_and_weights.jointIndices[v * 3 + 2], 0);
 								vert.weight0 = glm::vec4(rmesh.joint_and_weights.jointWeights[v * 3 + 0], rmesh.joint_and_weights.jointWeights[v * 3 + 1], rmesh.joint_and_weights.jointWeights[v * 3 + 2], 0);
 							} else {
-								vert.joint0 = glm::vec4(glm::make_vec4(&rmesh.joint_and_weights.jointIndices[v * rmesh.joint_and_weights.elementSize]));
+								uint32_t elementSize = rmesh.joint_and_weights.elementSize;
+								vert.joint0 = glm::uvec4(rmesh.joint_and_weights.jointIndices[v * elementSize  + 0], rmesh.joint_and_weights.jointIndices[v * elementSize + 1], rmesh.joint_and_weights.jointIndices[v * elementSize + 2], rmesh.joint_and_weights.jointIndices[v * elementSize + 3]);
 								vert.weight0 = glm::vec4(glm::make_vec4(&rmesh.joint_and_weights.jointWeights[v * rmesh.joint_and_weights.elementSize]));
 							}
 						}
 						else {
-							vert.joint0 = glm::vec4(0.0f);
+							vert.joint0 = glm::uvec4(0.0f);
 							vert.weight0 = glm::vec4(0.0f);
 						}
 						// Fix for all zero weights

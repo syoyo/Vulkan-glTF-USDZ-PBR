@@ -217,7 +217,7 @@ namespace vkUSDZ
 			glm::vec3 normal;
 			glm::vec2 uv0;
 			glm::vec2 uv1;
-			glm::vec4 joint0;
+			glm::uvec4 joint0;
 			glm::vec4 weight0;
 			glm::vec4 color;
 		};
