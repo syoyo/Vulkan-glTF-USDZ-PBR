@@ -2,7 +2,7 @@
 
 ## USDZ
 
-NOTE that PBR shading is work-in-progress.
+🚧 PBR shading is work-in-progress.
 
 <img src="./screenshots/damagedhelmet_usdz_android.jpg" width="644px">
 
