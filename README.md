@@ -1,5 +1,13 @@
 # Vulkan physically-Based Rendering using glTF 2.0 models and USDZ models
 
+## USDZ
+
+NOTE that PBR shading is work-in-progress.
+
+<img src="./screenshots/damagedhelmet_usdz_android.jpg" width="644px">
+
+## glTF 2.0
+
 <img src="./screenshots/damagedhelmet.jpg" width="644px"> <img src="./screenshots/polly.jpg" width="320px"> <img src="./screenshots/busterdrone.jpg" width="320px">
 
 [YouTube Vulkan glTF 2.0 playlist](https://www.youtube.com/watch?v=sl7iN-vQCOs&list=PLy80eMh1-zPUz7y1JtFiS9I6H7_trBUAf)
@@ -53,6 +61,7 @@ Model loading is implemented in the [vkUSDZ::Model](./base/VulkanUSDZModel.hpp) 
 The following USD features are currently supported by the [vkUSDZ::Model](./base/VulkanUSDZModel.hpp) class:
 
 * [x] Loading USDA, USDC and USDZ models
+    * [x] Android support.
     * [ ] Xform and Scope Prim hierarchy
     * [x] GeomMesh(polygon only)
       * [ ] per-face material using GeomSubset
