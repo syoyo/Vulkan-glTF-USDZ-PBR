@@ -32,6 +32,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+// TinyUSDZ: import asset_manager
+#include "io-util.hh"
+
 /*
 	PBR example main class
 */
@@ -157,6 +160,15 @@ public:
 	int32_t debugViewInputs = 0;
 	int32_t debugViewEquation = 0;
 
+	// List of glTF extensions supported by this application
+	// Models with un-supported extensions may not work/look as expected
+	const std::vector<std::string> supportedExtensions = {
+		"KHR_texture_basisu",
+		"KHR_materials_pbrSpecularGlossiness",
+		"KHR_materials_unlit",
+		"KHR_materials_emissive_strength"
+	};
+
 	VulkanApplication() : VulkanExampleBase()
 	{
 		title = "Vulkan USDZ+glTF 2.0 PBR - (C) Sascha Willems (www.saschawillems.de)";
@@ -227,7 +239,7 @@ public:
 					};
 
 					// Material properties define if we e.g. need to bind a pipeline variant with culling disabled (double sided)
-					if (alphaMode == vkglTF::Material::ALPHAMODE_BLEND) {
+					if (alphaMode == vkUSDZ::Material::ALPHAMODE_BLEND) {
 						pipelineVariant = "_alpha_blending";
 					} else {
 						if (primitive->material.doubleSided) {
@@ -566,7 +578,7 @@ public:
 			shaderMaterial.normalTextureSet = material.normalTexture != nullptr ? material.texCoordSets.normal : -1;
 			shaderMaterial.occlusionTextureSet = material.occlusionTexture != nullptr ? material.texCoordSets.occlusion : -1;
 			shaderMaterial.emissiveTextureSet = material.emissiveTexture != nullptr ? material.texCoordSets.emissive : -1;
-			shaderMaterial.alphaMask = static_cast<float>(material.alphaMode == vkglTF::Material::ALPHAMODE_MASK);
+			shaderMaterial.alphaMask = static_cast<float>(material.alphaMode == vkUSDZ::Material::ALPHAMODE_MASK);
 			shaderMaterial.alphaMaskCutoff = material.alphaCutoff;
 			shaderMaterial.emissiveStrength = material.emissiveStrength;
 
@@ -629,6 +641,12 @@ public:
 		createMaterialBuffer();
 		auto tFileLoad = std::chrono::duration<double, std::milli>(std::chrono::high_resolution_clock::now() - tStart).count();
 		std::cout << "Loading took " << tFileLoad << " ms" << std::endl;
+		// Check and list unsupported extensions
+		for (auto& ext : models.scene.extensions) {
+			if (std::find(supportedExtensions.begin(), supportedExtensions.end(), ext) == supportedExtensions.end()) {
+				std::cout << "[WARN] Unsupported extension " << ext << " detected. Scene may not work or display as intended\n";
+			}
+		}
 		resetCamera();
 
 		models.use_usdz = false;
@@ -666,6 +684,9 @@ public:
 	{
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
 		tinygltf::asset_manager = androidApp->activity->assetManager;
+
+        // TODO: Provide API to TinyUSDZ to set Android AssetManager
+        tinyusdz::io::asset_manager = androidApp->activity->assetManager;
 		if (use_usdz) {
 			readDirectory(assetpath + "models", "usdz", scenes, true);
 		} else {

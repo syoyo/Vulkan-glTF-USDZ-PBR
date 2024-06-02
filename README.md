@@ -125,7 +125,7 @@ git submodule update
 
 ## Building
 
-The repository contains everything required to compile and build the examples on **Windows**, **Linux** and **Android** using a C++ compiler that supports C++11. All required dependencies are included.
+The repository contains everything required to compile and build the examples on **Windows**, **Linux** and **Android** using a C++ compiler that supports C++14. All required dependencies are included.
 
 ### Windows, Linux
 
@@ -168,5 +168,5 @@ In order to enable support for loading Draco compressed glTF files you need to:
 
 ## Links
 * [glTF format specification](https://github.com/KhronosGroup/glTF)
-* [glTF Sample Models](https://github.com/KhronosGroup/glTF-Sample-Models)
+* [glTF V2.0 Sample Models](https://github.com/KhronosGroup/glTF-Sample-Assets)
 * [tiny glTF library](https://github.com/syoyo/tinygltf)
