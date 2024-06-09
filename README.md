@@ -4,7 +4,7 @@
 
 🚧 PBR shading is work-in-progress.
 
-<img src="./screenshots/damagedhelmet_usdz_android.jpg" width="644px">
+<img src="./screenshots/damagedhelmet_usdz.jpg" width="644px">
 
 ## glTF 2.0
 
@@ -70,8 +70,10 @@ The following USD features are currently supported by the [vkUSDZ::Model](./base
       * [ ] SkelRoot and Skeleton Prim
     * [ ] PBR material support
         * [x] baseColor texture 
-        * [ ] Metallic-Roughness workflow
+        * [x] Metallic-Roughness workflow
         * [ ] Specular-Glossiness workflow (useSpecularWorkflow)
+        * [ ] HDR textures.
+        * [ ] colorSpace conversion.
     * [ ] Animations   
         * [ ] Articulated (translate, rotate, scale) SkelAnimation
         * [ ] BlendShape weights
