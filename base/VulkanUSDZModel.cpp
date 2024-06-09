@@ -17,11 +17,162 @@
 
 #include "VulkanUSDZModel.h"
 
+#include "stb_image_resize2.h"
+
 // from tinyusdz/src/
 #include "io-util.hh"
 
 namespace vkUSDZ
 {
+
+namespace detail
+{
+	// Build occlusion, metallic and roughness texture
+	// r: occlusion
+	// g: roughness
+	// b: metallic
+	bool BuildOcclusionRoughnessMetallicTexture(
+		const float occlusionFactor,
+		const float roughnessFactor,
+		const float metallicFactor,
+		const std::vector<uint8_t> occlusionImageData,
+		const size_t occlusionImageWidth,
+		const size_t occlusionImageHeight,
+		const size_t occlusionImageChannels,
+		const size_t occlusionChannel,
+		const std::vector<uint8_t> roughnessImageData,
+		const size_t roughnessImageWidth,
+		const size_t roughnessImageHeight,
+		const size_t roughnessImageChannels,
+		const size_t roughnessChannel,
+		const std::vector<uint8_t> metallicImageData,
+		const size_t metallicImageWidth,
+		const size_t metallicImageHeight,
+		const size_t metallicImageChannels,
+		const size_t metallicChannel,
+		std::vector<uint8_t> &dst, // RGBA
+    size_t &dstWidth,	
+    size_t &dstHeight)	
+{
+	if (occlusionChannel > occlusionImageChannels) {
+		return false;
+	}
+	if (roughnessChannel > roughnessImageChannels) {
+		return false;
+	}
+	if (metallicChannel > metallicImageChannels) {
+		return false;
+	}
+
+	size_t maxImageWidth = 1;
+	size_t maxImageHeight = 1;
+	if (!occlusionImageData.empty()) {
+		maxImageWidth = (std::max)(maxImageWidth, occlusionImageWidth);
+		maxImageHeight = (std::max)(maxImageHeight, occlusionImageHeight);
+	}
+	if (!roughnessImageData.empty()) {
+		maxImageWidth = (std::max)(maxImageWidth,  roughnessImageWidth);
+		maxImageHeight = (std::max)(maxImageHeight, roughnessImageHeight);
+	}
+	if (!metallicImageData.empty()) {
+		maxImageWidth = (std::max)(maxImageWidth, metallicImageWidth);
+		maxImageHeight = (std::max)(maxImageHeight, metallicImageHeight);
+	}
+
+	std::vector<uint8_t> occlusionBuf;
+	std::vector<uint8_t> roughnessBuf;
+	std::vector<uint8_t> metallicBuf;
+
+	if (!occlusionImageData.empty()) {
+		if ((maxImageWidth != occlusionImageWidth) || (maxImageHeight != occlusionImageHeight)) {
+			stbir_pixel_layout layout;
+			if (occlusionImageChannels == 1) {
+				layout = STBIR_1CHANNEL;
+			} else if (occlusionImageChannels == 2) {
+				layout = STBIR_2CHANNEL;
+			} else if (occlusionImageChannels == 3) {
+				layout = STBIR_RGB;
+			} else { // assume RGBA
+				layout = STBIR_RGBA;
+			}
+
+			occlusionBuf.resize(maxImageWidth * maxImageHeight * occlusionImageChannels);
+
+			stbir_resize_uint8_linear(occlusionImageData.data(), occlusionImageWidth, occlusionImageHeight, 0, occlusionBuf.data(), maxImageWidth, maxImageHeight, 0, layout); 
+		}
+	} else {
+		occlusionBuf = occlusionImageData;
+	} 
+
+	if (!metallicImageData.empty()) {
+		if ((maxImageWidth != metallicImageWidth) || (maxImageHeight != metallicImageHeight)) {
+			stbir_pixel_layout layout;
+			if (metallicImageChannels == 1) {
+				layout = STBIR_1CHANNEL;
+			} else if (metallicImageChannels == 2) {
+				layout = STBIR_2CHANNEL;
+			} else if (metallicImageChannels == 3) {
+				layout = STBIR_RGB;
+			} else { // assume RGBA
+				layout = STBIR_RGBA;
+			}
+
+			metallicBuf.resize(maxImageWidth * maxImageHeight * metallicImageChannels);
+
+			stbir_resize_uint8_linear(metallicImageData.data(), metallicImageWidth, metallicImageHeight, 0, metallicBuf.data(), maxImageWidth, maxImageHeight, 0, layout); 
+		} else {
+			metallicBuf = metallicImageData;
+		}
+	} 
+
+	if (!roughnessImageData.empty()) {
+		if ((maxImageWidth != roughnessImageWidth) || (maxImageHeight != roughnessImageHeight)) {
+			stbir_pixel_layout layout;
+			if (roughnessImageChannels == 1) {
+				layout = STBIR_1CHANNEL;
+			} else if (roughnessImageChannels == 2) {
+				layout = STBIR_2CHANNEL;
+			} else if (roughnessImageChannels == 3) {
+				layout = STBIR_RGB;
+			} else { // assume RGBA
+				layout = STBIR_RGBA;
+			}
+
+			roughnessBuf.resize(maxImageWidth * maxImageHeight * roughnessImageChannels);
+
+			stbir_resize_uint8_linear(roughnessImageData.data(), roughnessImageWidth, roughnessImageHeight, 0, roughnessBuf.data(), maxImageWidth, maxImageHeight, 0, layout); 
+		} else {
+			roughnessBuf = roughnessImageData;
+		}
+	} 
+
+	uint8_t occlusionValue = uint8_t((std::max)((std::min)(255, int(occlusionFactor * 255.0f)), 0));
+	uint8_t metallicValue = uint8_t((std::max)((std::min)(255, int(metallicFactor * 255.0f)), 0));
+	uint8_t roughnessValue = uint8_t((std::max)((std::min)(255, int(roughnessFactor * 255.0f)), 0));
+
+	dst.resize(maxImageWidth * maxImageHeight * 3);
+
+	for (size_t i = 0; i < maxImageWidth * maxImageHeight; i++) {
+		// Use the first component of texel when input is a texture.
+		uint8_t r = occlusionBuf.size() ? occlusionBuf[i * occlusionImageChannels + occlusionChannel] : occlusionValue;
+		uint8_t g = roughnessBuf.size() ? roughnessBuf[i * roughnessImageChannels + roughnessChannel] : roughnessValue;
+		uint8_t b = metallicBuf.size() ? metallicBuf[i * metallicImageChannels + metallicChannel] : metallicValue;
+
+		dst[3 * i + 0] = r;
+		dst[3 * i + 1] = g;
+		dst[3 * i + 2] = b;
+	}
+
+	dstWidth = maxImageWidth;
+	dstHeight = maxImageHeight;
+
+	return true;
+}
+
+
+} // namespace detail
+
+
 	// Bounding box
 
 	BoundingBox::BoundingBox() {
@@ -709,6 +860,7 @@ namespace vkUSDZ
 			assert(image.buffer_id > -1);
 			tinyusdz::tydra::BufferData &buffer = scene.buffers[image.buffer_id];
 
+			// FIXME: Assume all textures are 8bit at the moment.
 			vkUSDZ::Texture texture;
 			texture.fromUSDZImage(image, buffer.data, textureSampler, device, transferQueue);
 			textures.push_back(texture);
@@ -775,9 +927,140 @@ namespace vkUSDZ
 		}
 	}
 
-	void Model::loadMaterials(tinyusdz::tydra::RenderScene &scene)
+	void Model::loadMaterials(tinyusdz::tydra::RenderScene &scene, vks::VulkanDevice *device, VkQueue transferQueue)
 	{
-		for (tinyusdz::tydra::RenderMaterial &rmat : scene.materials) {
+		// First build roughnessMetallic texture map, since this will extend `textures` array
+		std::map<size_t, std::map<std::string, size_t>> textureIdMap; // key = material_id, value = (attr_name, tex_id)
+ 
+		for (size_t mat_id = 0; mat_id < scene.materials.size(); mat_id++) {
+			const tinyusdz::tydra::RenderMaterial &rmat = scene.materials[mat_id];
+
+			if (rmat.surfaceShader.useSpecularWorkflow) {
+				// TODO
+				continue;
+			}
+
+      // Build metallic + roughness texture
+      float occlusionFactor = 1.0f;
+      float roughnessFactor = rmat.surfaceShader.roughness.value;
+      float metallicFactor = rmat.surfaceShader.metallic.value;
+
+      // Occlusion is not considered here.
+      std::vector<uint8_t> occlusionImageData;
+      size_t occlusionImageWidth{0}, occlusionImageHeight{0}, occlusionImageChannels{0}, occlusionChannel{0};
+
+      std::vector<uint8_t> metallicImageData;
+      size_t metallicImageWidth{0}, metallicImageHeight{0}, metallicImageChannels{0}, metallicChannel{0};
+
+      std::vector<uint8_t> roughnessImageData;
+      size_t roughnessImageWidth{0}, roughnessImageHeight{0}, roughnessImageChannels{0}, roughnessChannel{0};
+
+      if (rmat.surfaceShader.roughness.is_texture()) {
+        assert(scene.textures[size_t(rmat.surfaceShader.roughness.texture_id)].texture_image_id > -1);
+        const tinyusdz::tydra::UVTexture &tex = scene.textures[size_t(rmat.surfaceShader.roughness.texture_id)];
+
+        if (tex.connectedOutputChannel == tinyusdz::tydra::UVTexture::Channel::R) {
+          roughnessChannel = 0;
+        } else if (tex.connectedOutputChannel == tinyusdz::tydra::UVTexture::Channel::G) {
+          roughnessChannel = 1;
+        } else if (tex.connectedOutputChannel == tinyusdz::tydra::UVTexture::Channel::B) {
+          roughnessChannel = 2;
+        } else if (tex.connectedOutputChannel == tinyusdz::tydra::UVTexture::Channel::A) {
+          roughnessChannel = 3;
+        } else {
+          // TODO: Report error
+        }
+
+        const tinyusdz::tydra::TextureImage &texImage = scene.images[size_t(tex.texture_image_id)];
+        if (texImage.texelComponentType == tinyusdz::tydra::ComponentType::UInt8) {
+          roughnessImageData = scene.buffers[size_t(texImage.buffer_id)].data; // copy
+          roughnessImageWidth = texImage.width;
+          roughnessImageHeight = texImage.height;
+          roughnessImageChannels = texImage.channels;
+        } else {
+          std::cerr << "Currently only 8bit texture is supported for roughness texture map.\n";
+        }
+      }
+
+      if (rmat.surfaceShader.metallic.is_texture()) {
+        assert(scene.textures[size_t(rmat.surfaceShader.metallic.texture_id)].texture_image_id > -1);
+
+        const tinyusdz::tydra::UVTexture &tex = scene.textures[size_t(rmat.surfaceShader.metallic.texture_id)];
+
+        if (tex.connectedOutputChannel == tinyusdz::tydra::UVTexture::Channel::R) {
+          metallicChannel = 0;
+        } else if (tex.connectedOutputChannel == tinyusdz::tydra::UVTexture::Channel::G) {
+          metallicChannel = 1;
+        } else if (tex.connectedOutputChannel == tinyusdz::tydra::UVTexture::Channel::B) {
+          metallicChannel = 2;
+        } else if (tex.connectedOutputChannel == tinyusdz::tydra::UVTexture::Channel::A) {
+          metallicChannel = 3;
+        } else {
+          // TODO: Report error
+        }
+
+        const tinyusdz::tydra::TextureImage &texImage = scene.images[size_t(tex.texture_image_id)];
+        if (texImage.texelComponentType == tinyusdz::tydra::ComponentType::UInt8) {
+          metallicImageData = scene.buffers[size_t(texImage.buffer_id)].data; // copy
+          metallicImageWidth = texImage.width;
+          metallicImageHeight = texImage.height;
+          metallicImageChannels = texImage.channels;
+        } else {
+          std::cerr << "Currently only 8bit texture is supported for metallic texture map.\n";
+        }
+      }
+
+      std::vector<uint8_t> ormImageData;
+      size_t ormImageWidth;
+      size_t ormImageHeight;
+
+      if (detail::BuildOcclusionRoughnessMetallicTexture(
+        occlusionFactor,
+        roughnessFactor,
+        metallicFactor,
+        occlusionImageData,
+        occlusionImageWidth,
+        occlusionImageHeight,
+        occlusionImageChannels,
+				occlusionChannel,
+        roughnessImageData,
+        roughnessImageWidth,
+        roughnessImageHeight,
+        roughnessImageChannels,
+				roughnessChannel,
+        metallicImageData,
+        metallicImageWidth,
+        metallicImageHeight,
+        metallicImageChannels,
+				metallicChannel,
+        ormImageData,
+        ormImageWidth,
+        ormImageHeight)) {
+
+        vkUSDZ::TextureSampler textureSampler;
+        // No sampler for USDZ texture for now, use a default one
+        textureSampler.magFilter = VK_FILTER_LINEAR;
+        textureSampler.minFilter = VK_FILTER_LINEAR;
+        textureSampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        textureSampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        textureSampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+        tinyusdz::tydra::TextureImage ormImage;
+        ormImage.width = ormImageWidth;
+        ormImage.height = ormImageHeight;
+        ormImage.channels = 3; // RGB
+
+        vkUSDZ::Texture texture;
+        texture.fromUSDZImage(ormImage, ormImageData, textureSampler, device, transferQueue);
+        size_t tex_id = textures.size();
+        textures.push_back(texture);
+
+				textureIdMap[mat_id]["metallicRoughness"] = tex_id;
+      }
+    }
+		
+		for (size_t mat_id = 0; mat_id < scene.materials.size(); mat_id++) {
+			const tinyusdz::tydra::RenderMaterial &rmat = scene.materials[mat_id];
 			vkUSDZ::Material material{};
 			// TODO: Read doubleSided attribute from bound mesh.
 			material.doubleSided = true;
@@ -791,6 +1074,7 @@ namespace vkUSDZ
 			}
 
 			if (rmat.surfaceShader.useSpecularWorkflow) {
+				std::cout << "spercularWorkflow is TODO\n";
 #if 0 // TODO
 				if (ext->second.Has("specularGlossinessTexture")) {
 					auto index = ext->second.Get("specularGlossinessTexture").Get("index");
@@ -820,21 +1104,15 @@ namespace vkUSDZ
 			}
 #endif
 			} else {
+				
+        if (textureIdMap[mat_id].count("metallicRoughness")) {
+          material.metallicRoughnessTexture = &textures[textureIdMap[mat_id]["metallicRoughness"]];
+          material.texCoordSets.metallicRoughness = 0;
+        } else {
+          material.roughnessFactor = rmat.surfaceShader.roughness.value;
+          material.metallicFactor = rmat.surfaceShader.metallic.value;
+        }
 
-				// TODO: Combine metallic + roughness texture
-
-#if 0 // TODO
-			if (mat.values.find("metallicRoughnessTexture") != mat.values.end()) {
-				material.metallicRoughnessTexture = &textures[mat.values["metallicRoughnessTexture"].TextureIndex()];
-				material.texCoordSets.metallicRoughness = mat.values["metallicRoughnessTexture"].TextureTexCoord();
-			}
-			if (mat.values.find("roughnessFactor") != mat.values.end()) {
-				material.roughnessFactor = static_cast<float>(mat.values["roughnessFactor"].Factor());
-			}
-			if (mat.values.find("metallicFactor") != mat.values.end()) {
-				material.metallicFactor = static_cast<float>(mat.values["metallicFactor"].Factor());
-			}
-#endif
 			}
 
 			if (rmat.surfaceShader.normal.is_texture()) {
@@ -845,6 +1123,11 @@ namespace vkUSDZ
 			if (rmat.surfaceShader.emissiveColor.is_texture()) {
 				material.emissiveTexture = &textures[size_t(rmat.surfaceShader.emissiveColor.texture_id)];
 				material.texCoordSets.emissive = 0;
+
+				// FIXME. Read emissiveColor from 'default' value of emissiveColor attribute.
+				material.emissiveFactor.r = 1.0f;
+				material.emissiveFactor.g = 1.0f;
+				material.emissiveFactor.b = 1.0f;
 			} else {
 				material.emissiveFactor.r = rmat.surfaceShader.emissiveColor.value[0];
 				material.emissiveFactor.g = rmat.surfaceShader.emissiveColor.value[1];
@@ -852,8 +1135,14 @@ namespace vkUSDZ
 			}
 
 			if (rmat.surfaceShader.occlusion.is_texture()) {
-				material.occlusionTexture = &textures[size_t(rmat.surfaceShader.occlusion.texture_id)];
-				material.texCoordSets.occlusion = 0;
+				assert(scene.textures[size_t(rmat.surfaceShader.occlusion.texture_id)].texture_image_id > -1);
+				const tinyusdz::tydra::TextureImage &texImage = scene.images[size_t(scene.textures[size_t(rmat.surfaceShader.occlusion.texture_id)].texture_image_id)];
+				if (texImage.texelComponentType != tinyusdz::tydra::ComponentType::UInt8) {
+					std::cerr << "HDR occlusion map is not supported yet.\n";
+				} else {
+          material.occlusionTexture = &textures[size_t(rmat.surfaceShader.occlusion.texture_id)];
+          material.texCoordSets.occlusion = 0;
+				}
 			}
 
 #if 0 // TODO
@@ -1082,7 +1371,7 @@ namespace vkUSDZ
 
 			loadTextureSamplers(render_scene);
 			loadTextures(render_scene, device, transferQueue);
-			loadMaterials(render_scene);
+			loadMaterials(render_scene, device, transferQueue);
 
 			// Get vertex and index buffer sizes up-front
 			for (size_t i = 0; i < render_scene.nodes.size(); i++) {

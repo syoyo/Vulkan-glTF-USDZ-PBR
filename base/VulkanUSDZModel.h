@@ -266,7 +266,7 @@ namespace vkUSDZ
     VkSamplerAddressMode getVkWrapMode(tinyusdz::tydra::UVTexture::WrapMode wrapMode);
 		VkFilter getVkFilterMode(int32_t filterMode);
 		void loadTextureSamplers(tinyusdz::tydra::RenderScene& scene);
-    void loadMaterials(tinyusdz::tydra::RenderScene &scene);
+    void loadMaterials(tinyusdz::tydra::RenderScene &scene, vks::VulkanDevice *device, VkQueue transferQueue);
 #if 0 // TODO
 		void loadAnimations(tinyusdz::Model& gltfModel);
 #endif
